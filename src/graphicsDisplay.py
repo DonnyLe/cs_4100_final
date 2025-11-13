@@ -107,6 +107,7 @@ class InfoPane:
     def drawPane(self):
         self.scoreText = text(self.toScreen(
             0, 0), self.textColor, "SCORE:    0", "Times", self.fontSize, "bold")
+        self.timerText = None  # Will be initialized when maxSteps is set
 
     def initializeGhostDistances(self, distances):
         self.ghostDistanceText = []
@@ -124,6 +125,39 @@ class InfoPane:
 
     def updateScore(self, score):
         changeText(self.scoreText, "SCORE: % 4d" % score)
+    
+    def updateTimer(self, steps, maxSteps):
+        """Update the timer display with remaining steps as countdown"""
+        if maxSteps is None:
+            # Hide timer if maxSteps not set
+            if self.timerText is not None:
+                remove_from_screen(self.timerText)
+                self.timerText = None
+            return
+        
+        # Ensure steps is a number
+        if steps is None:
+            steps = 0
+        
+        remaining = max(0, maxSteps - steps)
+        # Convert steps to time format (assuming ~1 step per second for display)
+        # Format as MM:SS
+        minutes = remaining // 60
+        seconds = remaining % 60
+        timerStr = "TIME: %02d:%02d" % (minutes, seconds)
+        
+        if self.timerText is None:
+            # Initialize timer text - position it right next to the score
+            # Score text is about 120px wide, so put timer at x=130
+            timerX = 130
+            # Use bright white color for maximum visibility
+            timerColor = formatColor(1.0, 1.0, 1.0)  # Pure white
+            self.timerText = text(self.toScreen(
+                timerX, 0), timerColor, timerStr, "Times", self.fontSize, "bold")
+            refresh()  # Refresh to show the new text
+        else:
+            changeText(self.timerText, timerStr)
+            refresh()  # Refresh to update the text
 
     def setTeam(self, isBlue):
         text = "RED TEAM"
@@ -182,6 +216,10 @@ class PacmanGraphics:
         self.drawStaticObjects(state)
         self.drawAgentObjects(state)
 
+        # Initialize timer display
+        if state.maxSteps is not None:
+            self.infoPane.updateTimer(state.steps, state.maxSteps)
+
         # Information
         self.previousState = state
 
@@ -212,7 +250,9 @@ class PacmanGraphics:
     def drawStaticObjects(self, state):
         layout = self.layout
         self.drawWalls(layout.walls)
-        self.food = self.drawFood(layout.food)
+        # Use state's food grid which has reward values if randomRewards is enabled
+        # state is a GameStateData object, so access food directly
+        self.food = self.drawFood(state.food)
         self.capsules = self.drawCapsules(layout.capsules)
         refresh()
 
@@ -260,6 +300,8 @@ class PacmanGraphics:
         if newState._capsuleEaten != None:
             self.removeCapsule(newState._capsuleEaten, self.capsules)
         self.infoPane.updateScore(newState.score)
+        # Update timer with step countdown
+        self.infoPane.updateTimer(newState.steps, newState.maxSteps)
         if 'ghostDistances' in dir(newState):
             self.infoPane.updateGhostDistances(newState.ghostDistances)
 
@@ -573,17 +615,45 @@ class PacmanGraphics:
 
     def drawFood(self, foodMatrix):
         foodImages = []
-        color = FOOD_COLOR
+        defaultColor = FOOD_COLOR
         for xNum, x in enumerate(foodMatrix):
+            # Check if this is a capture game (team colors)
+            useTeamColors = False
             if self.capture and (xNum * 2) <= foodMatrix.width:
-                color = TEAM_COLORS[0]
+                teamColor = TEAM_COLORS[0]
+                useTeamColors = True
             if self.capture and (xNum * 2) > foodMatrix.width:
-                color = TEAM_COLORS[1]
+                teamColor = TEAM_COLORS[1]
+                useTeamColors = True
+            
             imageRow = []
             foodImages.append(imageRow)
             for yNum, cell in enumerate(x):
                 if cell:  # There's food here
                     screen = self.to_screen((xNum, yNum))
+                    
+                    # Determine color based on reward value
+                    if useTeamColors:
+                        # Use team colors for capture games
+                        color = teamColor
+                    elif isinstance(cell, int):
+                        # Random rewards enabled: gradient from yellow (0) to red (30)
+                        # More distinct colors: bright yellow to deep red
+                        value = max(0, min(30, cell))  # Clamp to 0-30
+                        ratio = value / 30.0  # 0.0 for value 0, 1.0 for value 30
+                        
+                        # Use a more distinct gradient
+                        # Yellow (0): R=1.0, G=0.9, B=0.0 (bright yellow)
+                        # Orange (15): R=1.0, G=0.5, B=0.0
+                        # Red (30): R=1.0, G=0.0, B=0.0 (deep red)
+                        r = 1.0
+                        g = 0.9 * (1.0 - ratio)  # Goes from 0.9 (yellow) to 0.0 (red)
+                        b = 0.0
+                        color = formatColor(r, g, b)
+                    else:
+                        # Default white color for regular pellets
+                        color = defaultColor
+                    
                     dot = circle(screen,
                                  FOOD_SIZE * self.gridSize,
                                  outlineColor=color, fillColor=color,
