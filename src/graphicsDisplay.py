@@ -81,6 +81,10 @@ CAPSULE_SIZE = 0.25
 WALL_RADIUS = 0.15
 
 
+import time
+
+import time
+
 class InfoPane:
     def __init__(self, layout, gridSize):
         self.gridSize = gridSize
@@ -89,6 +93,11 @@ class InfoPane:
         self.height = INFO_PANE_HEIGHT
         self.fontSize = 24
         self.textColor = PACMAN_COLOR
+        self.timerText = None
+        self.stepsText = None  # New: separate text for steps
+        self.startTime = None
+        self.startSteps = None
+        self.frameTime = None
         self.drawPane()
 
     def toScreen(self, pos, y=None):
@@ -108,6 +117,10 @@ class InfoPane:
         self.scoreText = text(self.toScreen(
             0, 0), self.textColor, "SCORE:    0", "Times", self.fontSize, "bold")
 
+    def setFrameTime(self, frameTime):
+        """Set the frame time for accurate step-to-time conversion"""
+        self.frameTime = frameTime
+
     def initializeGhostDistances(self, distances):
         self.ghostDistanceText = []
 
@@ -124,13 +137,79 @@ class InfoPane:
 
     def updateScore(self, score):
         changeText(self.scoreText, "SCORE: % 4d" % score)
+    
+    def updateTimer(self, steps, maxSteps):
+        """Update the timer and steps display"""
+        if maxSteps is None:
+            # Hide both timer and steps if maxSteps not set
+            if self.timerText is not None:
+                remove_from_screen(self.timerText)
+                self.timerText = None
+            if self.stepsText is not None:
+                remove_from_screen(self.stepsText)
+                self.stepsText = None
+            self.startTime = None
+            self.startSteps = None
+            return
+        
+        # Initialize timing on first call
+        if self.startTime is None:
+            self.startTime = time.time()
+            self.startSteps = steps if steps is not None else 0
+        
+        if steps is None:
+            steps = 0
+        
+        # Calculate remaining steps
+        stepsRemaining = max(0, maxSteps - steps)
+        
+        # Calculate elapsed real time
+        elapsedTime = time.time() - self.startTime
+        elapsedSteps = steps - self.startSteps
+        
+        # Estimate time per step based on actual gameplay
+        if elapsedSteps > 0 and elapsedTime > 0:
+            timePerStep = elapsedTime / elapsedSteps
+        elif self.frameTime is not None and self.frameTime > 0:
+            timePerStep = self.frameTime
+        else:
+            timePerStep = 0.1
+        
+        # Calculate estimated remaining time in seconds
+        remainingSeconds = stepsRemaining * timePerStep
+        
+        # Format time as MM:SS
+        minutes = int(remainingSeconds // 60)
+        seconds = int(remainingSeconds % 60)
+        timerStr = "TIME: %02d:%02d" % (minutes, seconds)
+        
+        # Format steps
+        stepsStr = "STEPS: %d" % stepsRemaining
+        
+        # Create or update timer text
+        if self.timerText is None:
+            timerX = 150
+            timerColor = formatColor(1.0, 1.0, 1.0)
+            screenPos = self.toScreen(timerX, 0)
+            self.timerText = text(screenPos, timerColor, timerStr, "Times", self.fontSize, "bold")
+        else:
+            changeText(self.timerText, timerStr)
+        
+        # Create or update steps text (positioned to the right of timer)
+        if self.stepsText is None:
+            stepsX = 300  # Position to the right of timer
+            stepsColor = formatColor(1.0, 0.9, 0.0)  # Yellowish color
+            screenPos = self.toScreen(stepsX, 0)
+            self.stepsText = text(screenPos, stepsColor, stepsStr, "Times", self.fontSize, "bold")
+        else:
+            changeText(self.stepsText, stepsStr)
 
     def setTeam(self, isBlue):
-        text = "RED TEAM"
+        text_str = "RED TEAM"
         if isBlue:
-            text = "BLUE TEAM"
+            text_str = "BLUE TEAM"
         self.teamText = text(self.toScreen(
-            300, 0), self.textColor, text, "Times", self.fontSize, "bold")
+            300, 0), self.textColor, text_str, "Times", self.fontSize, "bold")
 
     def updateGhostDistances(self, distances):
         if len(distances) == 0:
@@ -176,13 +255,17 @@ class PacmanGraphics:
     def initialize(self, state, isBlue=False):
         self.isBlue = isBlue
         self.startGraphics(state)
-
-        # self.drawDistributions(state)
-        self.distributionImages = None  # Initialized lazily
+        self.distributionImages = None
         self.drawStaticObjects(state)
         self.drawAgentObjects(state)
 
-        # Information
+        # Pass frameTime to InfoPane for accurate timing
+        self.infoPane.setFrameTime(self.frameTime)
+        
+        # Initialize timer display
+        if state.maxSteps is not None:
+            self.infoPane.updateTimer(state.steps, state.maxSteps)
+
         self.previousState = state
 
     def startGraphics(self, state):
@@ -212,7 +295,9 @@ class PacmanGraphics:
     def drawStaticObjects(self, state):
         layout = self.layout
         self.drawWalls(layout.walls)
-        self.food = self.drawFood(layout.food)
+        # Use state's food grid which has reward values if randomRewards is enabled
+        # state is a GameStateData object, so access food directly
+        self.food = self.drawFood(state.food)
         self.capsules = self.drawCapsules(layout.capsules)
         refresh()
 
@@ -260,6 +345,8 @@ class PacmanGraphics:
         if newState._capsuleEaten != None:
             self.removeCapsule(newState._capsuleEaten, self.capsules)
         self.infoPane.updateScore(newState.score)
+        # Update timer with step countdown
+        self.infoPane.updateTimer(newState.steps, newState.maxSteps)
         if 'ghostDistances' in dir(newState):
             self.infoPane.updateGhostDistances(newState.ghostDistances)
 
@@ -573,17 +660,45 @@ class PacmanGraphics:
 
     def drawFood(self, foodMatrix):
         foodImages = []
-        color = FOOD_COLOR
+        defaultColor = FOOD_COLOR
         for xNum, x in enumerate(foodMatrix):
+            # Check if this is a capture game (team colors)
+            useTeamColors = False
             if self.capture and (xNum * 2) <= foodMatrix.width:
-                color = TEAM_COLORS[0]
+                teamColor = TEAM_COLORS[0]
+                useTeamColors = True
             if self.capture and (xNum * 2) > foodMatrix.width:
-                color = TEAM_COLORS[1]
+                teamColor = TEAM_COLORS[1]
+                useTeamColors = True
+            
             imageRow = []
             foodImages.append(imageRow)
             for yNum, cell in enumerate(x):
                 if cell:  # There's food here
                     screen = self.to_screen((xNum, yNum))
+                    
+                    # Determine color based on reward value
+                    if useTeamColors:
+                        # Use team colors for capture games
+                        color = teamColor
+                    elif isinstance(cell, int):
+                        # Random rewards enabled: gradient from yellow (0) to red (30)
+                        # More distinct colors: bright yellow to deep red
+                        value = max(0, min(30, cell))  # Clamp to 0-30
+                        ratio = value / 30.0  # 0.0 for value 0, 1.0 for value 30
+                        
+                        # Use a more distinct gradient
+                        # Yellow (0): R=1.0, G=0.9, B=0.0 (bright yellow)
+                        # Orange (15): R=1.0, G=0.5, B=0.0
+                        # Red (30): R=1.0, G=0.0, B=0.0 (deep red)
+                        r = 1.0
+                        g = 0.9 * (1.0 - ratio)  # Goes from 0.9 (yellow) to 0.0 (red)
+                        b = 0.0
+                        color = formatColor(r, g, b)
+                    else:
+                        # Default white color for regular pellets
+                        color = defaultColor
+                    
                     dot = circle(screen,
                                  FOOD_SIZE * self.gridSize,
                                  outlineColor=color, fillColor=color,

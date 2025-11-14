@@ -134,6 +134,7 @@ class AgentState:
         self.configuration = startConfiguration
         self.isPacman = isPacman
         self.scaredTimer = 0
+        self.respawnTimer = 0  # Delay before ghost can move after being eaten
         # state below potentially used for contest only
         self.numCarrying = 0
         self.numReturned = 0
@@ -147,7 +148,7 @@ class AgentState:
     def __eq__(self, other):
         if other == None:
             return False
-        return self.configuration == other.configuration and self.scaredTimer == other.scaredTimer
+        return self.configuration == other.configuration and self.scaredTimer == other.scaredTimer and self.respawnTimer == other.respawnTimer
 
     def __hash__(self):
         return hash(hash(self.configuration) + 13 * hash(self.scaredTimer))
@@ -156,6 +157,7 @@ class AgentState:
         state = AgentState(self.start, self.isPacman)
         state.configuration = self.configuration
         state.scaredTimer = self.scaredTimer
+        state.respawnTimer = self.respawnTimer
         state.numCarrying = self.numCarrying
         state.numReturned = self.numReturned
         return state
@@ -179,8 +181,9 @@ class Grid:
     """
 
     def __init__(self, width, height, initialValue=False, bitRepresentation=None):
-        if initialValue not in [False, True]:
-            raise Exception('Grids can only contain booleans')
+        # Allow booleans and integers (for reward values)
+        if initialValue not in [False, True] and not isinstance(initialValue, int):
+            raise Exception('Grids can only contain booleans or integers')
         self.CELLS_PER_INT = 30
 
         self.width = width
@@ -214,7 +217,11 @@ class Grid:
         for l in self.data:
             for i in l:
                 if i:
-                    h += base
+                    # For integer reward values, include the actual value in hash
+                    if isinstance(i, int):
+                        h += base * i
+                    else:
+                        h += base
                 base *= 2
         return hash(h)
 
@@ -232,13 +239,20 @@ class Grid:
         return g
 
     def count(self, item=True):
+        # For food grids with reward values, count non-zero values when item=True
+        if isinstance(item, bool) and item == True:
+            return sum([sum([1 for cell in row if cell]) for row in self.data])
         return sum([x.count(item) for x in self.data])
 
     def asList(self, key=True):
         list = []
         for x in range(self.width):
             for y in range(self.height):
-                if self[x][y] == key:
+                # For food grids with reward values, treat non-zero as True
+                if isinstance(key, bool) and key == True:
+                    if self[x][y]:
+                        list.append((x, y))
+                elif self[x][y] == key:
                     list.append((x, y))
         return list
 
@@ -406,6 +420,12 @@ class GameStateData:
             self.layout = prevState.layout
             self._eaten = prevState._eaten
             self.score = prevState.score
+            self.steps = prevState.steps
+            self.maxSteps = prevState.maxSteps
+        else:
+            # Initialize defaults for new state
+            self.steps = 0
+            self.maxSteps = None
 
         self._foodEaten = None
         self._foodAdded = None
@@ -514,11 +534,27 @@ class GameStateData:
             return '3'
         return 'E'
 
-    def initialize(self, layout, numGhostAgents):
+    def initialize(self, layout, numGhostAgents, randomRewards=False, maxSteps=None):
         """
         Creates an initial game state from a layout array (see layout.py).
         """
         self.food = layout.food.copy()
+        self.maxSteps = maxSteps  # Set maximum steps for timer
+        # Assign random reward values (0-30) to each pellet if enabled
+        # Higher probability for low (0-5) and high (25-30) rewards, lower for medium (6-24)
+        if randomRewards:
+            import random
+            for x in range(self.food.width):
+                for y in range(self.food.height):
+                    if self.food[x][y]:  # If there's a pellet
+                        # Weighted distribution: favor extremes
+                        rand = random.random()
+                        if rand < 0.4:  # 40% chance for low rewards (0-5)
+                            self.food[x][y] = random.randint(0, 5)
+                        elif rand < 0.8:  # 40% chance for high rewards (25-30)
+                            self.food[x][y] = random.randint(25, 30)
+                        else:  # 20% chance for medium rewards (6-24)
+                            self.food[x][y] = random.randint(6, 24)
         #self.capsules = []
         self.capsules = layout.capsules[:]
         self.layout = layout

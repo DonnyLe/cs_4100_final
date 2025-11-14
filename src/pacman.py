@@ -120,8 +120,11 @@ class GameState:
         # Time passes
         if agentIndex == 0:
             state.data.scoreChange += -TIME_PENALTY  # Penalty for waiting around
+            # Increment step counter when pacman moves (one step per turn)
+            state.data.steps += 1
         else:
             GhostRules.decrementTimer(state.data.agentStates[agentIndex])
+            GhostRules.decrementRespawnTimer(state.data.agentStates[agentIndex])
 
         # Resolve multi-agent effects
         GhostRules.checkDeath(state, agentIndex)
@@ -256,11 +259,11 @@ class GameState:
 
         return str(self.data)
 
-    def initialize(self, layout, numGhostAgents=1000):
+    def initialize(self, layout, numGhostAgents=1000, randomRewards=False, maxSteps=None):
         """
         Creates an initial game state from a layout array (see layout.py).
         """
-        self.data.initialize(layout, numGhostAgents)
+        self.data.initialize(layout, numGhostAgents, randomRewards=randomRewards, maxSteps=maxSteps)
 
 ############################################################################
 #                     THE HIDDEN SECRETS OF PACMAN                         #
@@ -280,13 +283,15 @@ class ClassicGameRules:
     and how the game starts and ends.
     """
 
-    def __init__(self, timeout=30):
+    def __init__(self, timeout=30, randomRewards=False, maxSteps=None):
         self.timeout = timeout
+        self.randomRewards = randomRewards
+        self.maxSteps = maxSteps  # Maximum steps before timeout
 
     def newGame(self, layout, pacmanAgent, ghostAgents, display, quiet=False, catchExceptions=False):
         agents = [pacmanAgent] + ghostAgents[:layout.getNumGhosts()]
         initState = GameState()
-        initState.initialize(layout, len(ghostAgents))
+        initState.initialize(layout, len(ghostAgents), randomRewards=self.randomRewards, maxSteps=self.maxSteps)
         game = Game(agents, display, self, catchExceptions=catchExceptions)
         game.state = initState
         self.initialState = initState.deepCopy()
@@ -297,6 +302,14 @@ class ClassicGameRules:
         """
         Checks to see whether it is time to end the game.
         """
+        # Check if max steps reached (timeout)
+        if state.data.maxSteps is not None and state.data.steps >= state.data.maxSteps:
+            if not state.isWin() and not state.isLose():
+                # Timeout - game ends without completing board
+                state.data._lose = True
+                self.lose(state, game)
+                return
+        
         if state.isWin():
             self.win(state, game)
         if state.isLose():
@@ -342,7 +355,7 @@ class PacmanRules:
     These functions govern how pacman interacts with his environment under
     the classic game rules.
     """
-    PACMAN_SPEED = 1
+    PACMAN_SPEED = 0.5  # Slowed down by half
 
     def getLegalActions(state):
         """
@@ -378,7 +391,10 @@ class PacmanRules:
         x, y = position
         # Eat food
         if state.data.food[x][y]:
-            state.data.scoreChange += 10
+            # Get the reward value from the pellet (default 10, or integer value if randomRewards enabled)
+            # Use type() check because isinstance(True, int) returns True (booleans are int subclass)
+            reward = state.data.food[x][y] if type(state.data.food[x][y]) == int else 10
+            state.data.scoreChange += reward
             state.data.food = state.data.food.copy()
             state.data.food[x][y] = False
             state.data._foodEaten = position
@@ -401,14 +417,20 @@ class GhostRules:
     """
     These functions dictate how ghosts interact with their environment.
     """
-    GHOST_SPEED = 1.0
+    GHOST_SPEED = 0.5  # Slowed down by half
 
     def getLegalActions(state, ghostIndex):
         """
         Ghosts cannot stop, and cannot turn around unless they
         reach a dead end, but can turn 90 degrees at intersections.
+        Ghosts also cannot move if respawn timer is active.
         """
-        conf = state.getGhostState(ghostIndex).configuration
+        ghostState = state.getGhostState(ghostIndex)
+        # If ghost is respawning, return only STOP action (effectively no movement)
+        if ghostState.respawnTimer > 0:
+            return [Directions.STOP]
+        
+        conf = ghostState.configuration
         possibleActions = Actions.getPossibleActions(
             conf, state.data.layout.walls)
         reverse = Actions.reverseDirection(conf.direction)
@@ -426,6 +448,10 @@ class GhostRules:
             raise Exception("Illegal ghost action " + str(action))
 
         ghostState = state.data.agentStates[ghostIndex]
+        # Ghost cannot move if respawn timer is active
+        if ghostState.respawnTimer > 0:
+            return  # Skip movement during respawn delay
+        
         speed = GhostRules.GHOST_SPEED
         if ghostState.scaredTimer > 0:
             speed /= 2.0
@@ -441,6 +467,12 @@ class GhostRules:
                 ghostState.configuration.pos)
         ghostState.scaredTimer = max(0, timer - 1)
     decrementTimer = staticmethod(decrementTimer)
+
+    def decrementRespawnTimer(ghostState):
+        """Decrement respawn timer for ghosts"""
+        if ghostState.respawnTimer > 0:
+            ghostState.respawnTimer -= 1
+    decrementRespawnTimer = staticmethod(decrementRespawnTimer)
 
     def checkDeath(state, agentIndex):
         pacmanPosition = state.getPacmanPosition()
@@ -462,6 +494,7 @@ class GhostRules:
             state.data.scoreChange += 200
             GhostRules.placeGhost(state, ghostState)
             ghostState.scaredTimer = 0
+            ghostState.respawnTimer = 15  # Respawn delay: 15 steps
             # Added for first-person
             state.data._eaten[agentIndex] = True
         else:
@@ -554,6 +587,10 @@ def readCommand(argv):
                       help='Turns on exception handling and timeouts during games', default=False)
     parser.add_option('--timeout', dest='timeout', type='int',
                       help=default('Maximum length of time an agent can spend computing in a single game'), default=30)
+    parser.add_option('-R', '--randomRewards', action='store_true', dest='randomRewards',
+                      help='Enable random reward values (0-30) for pellets', default=False)
+    parser.add_option('--maxSteps', dest='maxSteps', type='int',
+                      help=default('Maximum number of steps before timeout (for training)'), default=None)
 
     options, otherjunk = parser.parse_args(argv)
     if len(otherjunk) != 0:
@@ -606,6 +643,8 @@ def readCommand(argv):
     args['record'] = options.record
     args['catchExceptions'] = options.catchExceptions
     args['timeout'] = options.timeout
+    args['randomRewards'] = options.randomRewards
+    args['maxSteps'] = options.maxSteps
 
     # Special case: recorded games don't use the runGames method or args structure
     if options.gameToReplay != None:
@@ -672,11 +711,11 @@ def replayGame(layout, actions, display):
     display.finish()
 
 
-def runGames(layout, pacman, ghosts, display, numGames, record, numTraining=0, catchExceptions=False, timeout=30):
+def runGames(layout, pacman, ghosts, display, numGames, record, numTraining=0, catchExceptions=False, timeout=30, randomRewards=False, maxSteps=None):
     import __main__
     __main__.__dict__['_display'] = display
 
-    rules = ClassicGameRules(timeout)
+    rules = ClassicGameRules(timeout, randomRewards=randomRewards, maxSteps=maxSteps)
     games = []
 
     for i in range(numGames):
