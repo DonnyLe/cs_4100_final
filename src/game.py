@@ -422,6 +422,10 @@ class GameStateData:
             self.score = prevState.score
             self.steps = prevState.steps
             self.maxSteps = prevState.maxSteps
+        else:
+            # Initialize defaults for new state
+            self.steps = 0
+            self.maxSteps = None
 
         self._foodEaten = None
         self._foodAdded = None
@@ -430,8 +434,6 @@ class GameStateData:
         self._lose = False
         self._win = False
         self.scoreChange = 0
-        self.steps = 0  # Step counter for timer
-        self.maxSteps = None  # Maximum steps before timeout
 
     def deepCopy(self):
         state = GameStateData(self)
