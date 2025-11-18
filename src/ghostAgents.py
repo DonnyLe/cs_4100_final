@@ -37,8 +37,12 @@ class GhostAgent(Agent):
 
 class RandomGhost(GhostAgent):
     "A ghost that chooses a legal action uniformly at random."
-
-    pass
+    def getDistribution(self, state):
+        dist = util.Counter()
+        for a in state.getLegalActions(self.index):
+            dist[a] = 1.0
+        dist.normalize()
+        return dist
 
 
 class DirectionalGhost(GhostAgent):
