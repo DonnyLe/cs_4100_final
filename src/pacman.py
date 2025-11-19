@@ -280,7 +280,7 @@ class GameState:
                 indices.append(index)
         return indices if indices else [action_list.index(Directions.STOP)]
 
-    def buildObservation(self, radius=2):
+    def buildObservation(self, window_size=2):
         '''
         Just like programming assignment 2, our agents that are created using reinforcement learning will need
         to learn optimal actions based on specific states.  However, due to the enormous amount of possible states
@@ -305,8 +305,8 @@ class GameState:
             ghost_map.setdefault((gx, gy), []).append(ghost_state.scaredTimer > 0)
         
         window = {}
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
+        for dx in range(-window_size, window_size + 1):
+            for dy in range(-window_size, window_size + 1):
                 x, y = px + dx, py + dy
                 in_bounds = 0 <= x < walls.width and 0 <= y < walls.height
                 cell = {
@@ -335,8 +335,25 @@ class GameState:
             'at_capsule': (px, py) in capsules,
             'ghost_in_cell': bool(ghost_map.get((px, py))),
             'scared_ghost_in_cell': any(ghost_map.get((px, py), [])),
-            'radius': radius,
+            'window_size': window_size,
         }
+
+    def stepWithGhosts(self, pacman_action, ghost_agents):
+        '''
+        Applies a given action to the game environment, then triggers all ghost actions.
+        '''
+        # Apply Pacman action
+        state = self.generateSuccessor(0, pacman_action)
+        
+        # Make sure the game isn't in a terminal state, if not move ghosts
+        if not state.isWin() and not state.isLose():
+            for idx, ghost in enumerate(ghost_agents, start=1):
+                if state.isWin() or state.isLose():
+                    break
+                ghost_action = ghost.getAction(state)
+                state = state.generateSuccessor(idx, ghost_action)
+        
+        return state
 
 
 ############################################################################
