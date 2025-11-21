@@ -468,6 +468,9 @@ class GameStateData:
             return False
         return True
 
+    # We can use this __hash__ method right here instead of the one I made:
+    # hopefully could be quicker?
+    # Except this one takes score into account, not sure if we want that
     def __hash__(self):
         """
         Allows states to be keys of dictionaries.

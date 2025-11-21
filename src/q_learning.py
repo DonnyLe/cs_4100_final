@@ -1,19 +1,20 @@
 import sys
+import os
 import time
 import pickle
 import random
 import textwrap
+import textDisplay
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from pacman import GameState, ClassicGameRules
+from game import Agent, Directions, Game
+from pacman import GameState, runGames, readCommand, ClassicGameRules
 import layout as pac_layout
 import ghostAgents
-from game import Directions
-from util import nearestPoint
 from graphicsDisplay import PacmanGraphics
 
 BOLD = '\033[1m'
@@ -21,221 +22,60 @@ RESET = '\033[0m'
 
 ACTION_LIST = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST, Directions.STOP]
 
-WINDOW_RADIUS = 2  # 5x5 observation window
-LAYOUT_NAME = 'mediumClassic'
-GHOST_AGENT = 'RandomGhost'
-NUM_GHOSTS = 2
-MAX_STEPS = 1000
-FRAME_TIME = 0.0
+# ENV_WINDOW_SIZE = 2  # Play with this parameter to test different observation windows
+ENV_WINDOW_SIZE = 3  # Let's try 3, this would be a 7x7 observation window, so pretty big... idk i'm curious if he'll do better
 
+OUTPUT_DIR = 'q_learning_data'  # Just ensuring we output every file to one folder to keep things clean and organized
+
+# Just some functionality for ensuring we output files to the right place
+def ensure_output_dir():
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+    return OUTPUT_DIR
+
+def get_output_path(filename):
+    ensure_output_dir()
+    return os.path.join(OUTPUT_DIR, filename)
+
+# Here's functionality for recognizing whether we're running our agent in training/evaluation mode, and if we'd like to
+# visualize gameplay using the GUI or just let it do its thing under the hood.
 train_flag = 'train' in sys.argv
 gui_flag = 'gui' in sys.argv
 
-
-# class ActionSpace:
-#     def __init__(self, actions):
-#         self.actions = actions
-#         self.n = len(actions)
-
-#     def sample(self):
-#         return random.randrange(self.n)
-
-#     def to_direction(self, index):
-#         index = max(0, min(self.n - 1, int(index)))
-#         return self.actions[index]
-
-
-# class PacmanEnv:
-#     def __init__(self, layout_name=LAYOUT_NAME, radius=WINDOW_RADIUS, num_ghosts=NUM_GHOSTS,
-#                  ghost_name=GHOST_AGENT, gui=False, frame_time=FRAME_TIME, max_steps=MAX_STEPS):
-#         self.layout_name = layout_name
-#         self.radius = radius
-#         self.num_ghosts = num_ghosts
-#         self.ghost_cls = getattr(ghostAgents, ghost_name)
-#         self.gui = gui
-#         self.frame_time = frame_time
-#         self.max_steps = max_steps
-#         self.display = None
-#         self.rules = ClassicGameRules(timeout=max_steps)
-#         self.action_space = ActionSpace([
-#             Directions.NORTH,
-#             Directions.SOUTH,
-#             Directions.EAST,
-#             Directions.WEST,
-#             Directions.STOP,
-#         ])
-#         self.state = None
-#         self.ghosts = []
-#         self.prev_score = 0.0
-#         self.steps = 0
-
-#     def reset(self):
-#         layout_obj = pac_layout.getLayout(self.layout_name)
-#         if layout_obj is None:
-#             raise ValueError(f"Layout {self.layout_name} not found.")
-
-#         self.state = GameState()
-#         self.state.initialize(layout_obj, self.num_ghosts)
-#         self.ghosts = [self.ghost_cls(i + 1) for i in range(self.num_ghosts)]
-#         self.prev_score = self.state.getScore()
-#         self.steps = 0
-
-#         if self.gui:
-#             from graphicsDisplay import PacmanGraphics
-#             self.display = PacmanGraphics(frameTime=self.frame_time)
-#             self.display.initialize(self.state.data)
-
-#         obs = self._build_observation()
-#         return obs, 0.0, False, {}
-
-#     def step(self, action_index):
-#         if self.state is None:
-#             raise RuntimeError("Call reset() before step().")
-
-#         direction = self.action_space.to_direction(action_index)
-#         legal = self.state.getLegalPacmanActions()
-        
-#         # Ensure we always use a legal action
-#         if direction not in legal:
-#             # Remove STOP if there are other options
-#             if Directions.STOP in legal and len(legal) > 1:
-#                 legal = [a for a in legal if a != Directions.STOP]
-#             # Pick first legal action (or STOP if it's the only option)
-#             direction = legal[0] if legal else Directions.STOP
-
-#         # Apply Pacman's action
-#         self.state = self.state.generateSuccessor(0, direction)
-
-#         if self.gui and self.display:
-#             self.display.update(self.state.data)
-
-#         # Only move ghosts if game is not over
-#         if not self.state.isWin() and not self.state.isLose():
-#             for idx, ghost in enumerate(self.ghosts, start=1):
-#                 # Check again in case state became terminal during ghost moves
-#                 if self.state.isWin() or self.state.isLose():
-#                     break
-#                 ghost_action = ghost.getAction(self.state)
-#                 self.state = self.state.generateSuccessor(idx, ghost_action)
-#                 if self.gui and self.display:
-#                     self.display.update(self.state.data)
-
-#         current_score = self.state.getScore()
-#         reward = current_score - self.prev_score
-#         self.prev_score = current_score
-#         self.steps += 1
-
-#         done = self.state.isWin() or self.state.isLose() or self.steps >= self.max_steps
-#         obs = self._build_observation()
-#         info = {
-#             'score': current_score,
-#             'win': self.state.isWin(),
-#             'lose': self.state.isLose(),
-#             'steps': self.steps,
-#         }
-
-#         if done and self.display:
-#             self.display.finish()
-
-#         return obs, reward, done, info
-
-#     def get_legal_actions(self):
-#         """Return list of legal action indices for current state."""
-#         if self.state is None:
-#             return []
-#         legal_dirs = self.state.getLegalPacmanActions()
-#         # Remove STOP if there are other options
-#         if Directions.STOP in legal_dirs and len(legal_dirs) > 1:
-#             legal_dirs = [d for d in legal_dirs if d != Directions.STOP]
-#         # Map directions to action indices
-#         legal_indices = []
-#         for idx, direction in enumerate(self.action_space.actions):
-#             if direction in legal_dirs:
-#                 legal_indices.append(idx)
-#         return legal_indices if legal_indices else [self.action_space.actions.index(Directions.STOP)]
-
-#     def _build_observation(self):
-#         pac_pos = self.state.getPacmanPosition()
-#         px, py = int(round(pac_pos[0])), int(round(pac_pos[1]))
-#         walls = self.state.getWalls()
-#         food = self.state.getFood()
-#         capsules = set((int(x), int(y)) for x, y in self.state.getCapsules())
-
-#         ghost_map = {}
-#         for ghost_state in self.state.getGhostStates():
-#             gpos = ghost_state.getPosition()
-#             if gpos is None:
-#                 continue
-#             gx, gy = nearestPoint(gpos)
-#             gx, gy = int(gx), int(gy)
-#             ghost_map.setdefault((gx, gy), []).append(
-#                 ghost_state.scaredTimer > 0
-#             )
-
-#         window = {}
-#         for dx in range(-self.radius, self.radius + 1):
-#             for dy in range(-self.radius, self.radius + 1):
-#                 x, y = px + dx, py + dy
-#                 in_bounds = 0 <= x < walls.width and 0 <= y < walls.height
-#                 cell = {
-#                     'in_bounds': in_bounds,
-#                     'wall': False,
-#                     'food': False,
-#                     'capsule': False,
-#                     'ghosts': [],
-#                     'scared_ghosts': [],
-#                 }
-#                 if in_bounds:
-#                     cell['wall'] = walls[x][y]
-#                     cell['food'] = bool(food[x][y])
-#                     cell['capsule'] = (x, y) in capsules
-#                     for scared in ghost_map.get((x, y), []):
-#                         if scared:
-#                             cell['scared_ghosts'].append(True)
-#                         else:
-#                             cell['ghosts'].append(True)
-#                 window[(dx, dy)] = cell
-
-#         obs = {
-#             'pacman_position': (px, py),
-#             'window': window,
-#             'at_food': bool(food[px][py]),
-#             'at_capsule': (px, py) in capsules,
-#             'ghost_in_cell': bool(ghost_map.get((px, py))),
-#             'scared_ghost_in_cell': any(ghost_map.get((px, py), [])),
-#             'radius': self.radius,
-#         }
-#         return obs
-
-
-# env = PacmanEnv(gui=gui_flag)
-
-layout_obj = pac_layout.getLayout(LAYOUT_NAME)
-ghost_cls = getattr(ghostAgents, GHOST_AGENT)
-ghosts = [ghost_cls(i + 1) for i in range(NUM_GHOSTS)]
-
-# GUI setup (if needed)
-display = None
-if gui_flag:
-    display = PacmanGraphics(frameTime=FRAME_TIME)
-
-def reset_game():
-    '''Create a new game state and return initial observation.'''
-    state = GameState()
-    state.initialize(layout_obj, NUM_GHOSTS)
-    
-    if display:
-        display.initialize(state.data)
-        display.update(state.data)
-    
-    obs = state.buildObservation(radius=WINDOW_RADIUS)
-    return state, obs, state.getScore()
-
-
-def hash(obs):
+# Okay so runGames is a method in the OG pacman.py file that runs a specified number of games.  Below is simply a wrapper (basically
+# the exact same function), but it contains functionality for:
+# a. Ensuring we don't actually print out the "Pacman died!" stuff every time we run a game.
+# b. Displaying or not displaying the GUI depending on the flag we give in the terminal.
+def runGamesQuiet(layout, pacman, ghosts, display, numGames, record, numTraining=0, catchExceptions=False, timeout=30, randomRewards=False, maxSteps=None):
     '''
-    Just like PA2, we can simply hash the observed state into a single integer.  In this case
-    we will use a base-7 system to encode the observation window.  The encoding will be as follows:
+    Wrapper around runGames that suppresses all game output messages.
+    '''
+    
+    rules = ClassicGameRules(timeout, randomRewards=randomRewards, maxSteps=maxSteps)
+    rules.quiet = True  # This is the parameter to stop the "Pacman died!" stuff
+    games = []
+
+    use_gui = isinstance(display, PacmanGraphics)
+    
+    for i in tqdm(range(numGames), desc="Games", unit="game"):
+        # To suppress output from the OG setup, we need to use NullGraphics
+        if use_gui:
+            gameDisplay = display
+        else:
+            gameDisplay = textDisplay.NullGraphics()
+        game = rules.newGame(layout, pacman, ghosts, gameDisplay, True, catchExceptions)
+        game.run()
+        games.append(game)  # Always append, unlike original runGames
+    
+    return games
+
+
+# This function is basically the same logic as the one from Programming Assignment 2, all we're doing here is turning each observed
+# state into a single integer so that it's easier to create and then lookup optimal actions from our Q-table.
+def hash_observation(obs):
+    '''
+    Hash the observed state into a single integer using base-7 encoding.
+    Encoding:
     0 -> wall/out of bounds
     1 -> empty
     2 -> food
@@ -244,14 +84,14 @@ def hash(obs):
     5 -> scared ghost
     6 -> pacman (center cell)
     '''
-    radius = obs.get('radius', WINDOW_RADIUS)
+    window_size = obs.get('window_size', ENV_WINDOW_SIZE)
     window = obs.get('window', {})
     base = 7
     value = 0
     multiplier = 1
 
-    for dx in range(-radius, radius + 1):
-        for dy in range(-radius, radius + 1):
+    for dx in range(-window_size, window_size + 1):
+        for dy in range(-window_size, window_size + 1):
             cell = window.get((dx, dy))
             code = 0
             if cell and cell['in_bounds'] and not cell['wall']:
@@ -270,9 +110,9 @@ def hash(obs):
             multiplier *= base
     return value
 
-
-# Helper method for plotting the running average of rewards over training episodes:
-def training_rewards_plot(reward_df: pd.DataFrame = None, num_episodes: int = None, decay_rate: float = None):
+# Taken from my PA2 assignment, this method is just a helper to help with plotting out the running average of rewards
+# over a training cycle.  Helps identify if the agent is actually getting better or just shitty the whole time.
+def training_rewards_plot(reward_df, num_episodes, decay_rate):
     reward_df = reward_df.sort_values('episode')
 
     plt.figure(figsize=(10, 6))
@@ -293,126 +133,215 @@ def training_rewards_plot(reward_df: pd.DataFrame = None, num_episodes: int = No
     plt.legend(fontsize=11)
     plt.tight_layout()
 
-    out_name = f"avg_reward_plot_{num_episodes}_{decay_rate}.png"
+    out_name = get_output_path(f"avg_reward_plot_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.png")
     plt.savefig(out_name, dpi=300)
     plt.close()
 
-
-def Q_learning(num_episodes=10000, gamma=0.9, epsilon=1.0, decay_rate=0.999):
+# And here's the big guy, the class that holds our Q-learning agent.
+class QLearningAgent(Agent):
     '''
-    Run Q-learning algorithm for a specified number of episodes.
-
-    Parameters:
-    - num_episodes (int): Number of episodes to run.
-    - gamma (float): Discount factor.
-    - epsilon (float): Exploration rate.
-    - decay_rate (float): Rate at which epsilon decays. Epsilon should be decayed as epsilon = epsilon * decay_rate after each episode.
-
-    Returns:
-    - Q_table (dict): Dictionary containing the Q-values for each state-action pair.
+    Q-learning agent that uses partial observability like PA2, with specified window size from above.
+    The agent implements the Agent interface from the OG pacman environment we forked, that way it should
+    provide some easy access for us to implement advancements to the Q-learning algorithm down the road.
     '''
-    Q_table = {}
-    max_steps = MAX_STEPS
-    n_actions = len(ACTION_LIST)
-    N_updates = {}
 
-    # Keep track of running rewards:
-    ep_rewards = np.empty(num_episodes, dtype=np.float64)
-    running_sum = 0.0
+    def __init__(self, 
+                 window_size=ENV_WINDOW_SIZE,
+                 gamma=0.9,
+                 epsilon=1.0,
+                 decay_rate=0.999,
+                 min_epsilon=0.05,
+                 qfile=None,
+                 load_qtable=False):
+        Agent.__init__(self)
+        self.window_size = window_size
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.initial_epsilon = epsilon
+        self.decay_rate = decay_rate
+        self.min_epsilon = min_epsilon
+        self.qfile = qfile
+        
+        self.q_table = {}
+        self.n_updates = {}
+        self.n_actions = len(ACTION_LIST)
+        self.training = True  # Default to training mode
+        
+        # Episode tracking
+        self.last_state_hash = None
+        self.last_action_idx = None
+        self.last_score = 0.0
+        self.episode_reward = 0.0
+        self.episode_rewards = []
+        
+        # Load Q-table if specified
+        if load_qtable and qfile:
+            self._load_qtable()
 
-    time_start = time.perf_counter()
+    def _load_qtable(self):
+        '''Load Q-table from file.'''
+        if not self.qfile or not os.path.exists(get_output_path(self.qfile)):
+            return
+        try:
+            with open(get_output_path(self.qfile), 'rb') as f:
+                data = pickle.load(f)
+                if isinstance(data, dict) and 'q_table' in data:
+                    self.q_table = data['q_table']
+                    self.n_updates = data.get('n_updates', {})
+                else:
+                    self.q_table = data
+                    self.n_updates = {k: np.zeros(self.n_actions, dtype=np.float64) 
+                                     for k in self.q_table}
+            print(f"[QLearningAgent] Loaded Q-table from {self.qfile} ({len(self.q_table)} states)")
+        except Exception as e:
+            print(f"[QLearningAgent] Failed to load Q-table: {e}")
 
-    for episode in tqdm(range(num_episodes)):
-        game_state, obs, prev_score = reset_game()
-        done = False
-        steps = 0
-        episode_reward = 0.0
+    def _save_qtable(self):
+        '''Save Q-table to file.'''
+        if not self.qfile:
+            return
+        try:
+            data = {'q_table': self.q_table, 'n_updates': self.n_updates}
+            with open(get_output_path(self.qfile), 'wb') as f:
+                pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception as e:
+            print(f"[QLearningAgent] Failed to save Q-table: {e}")
 
-        while not done and steps < max_steps:
-            state = hash(obs)
+    def _ensure_state(self, state_hash):
+        '''
+        Handy-dandy helper that we use to immediately check if the state we're in has been seen before.
+        If not, then initalize a row in the Q-table for this newly observed state.
+        '''
+        if state_hash not in self.q_table:
+            self.q_table[state_hash] = np.zeros(self.n_actions, dtype=np.float64)
+            self.n_updates[state_hash] = np.zeros(self.n_actions, dtype=np.float64)
 
-            if state not in Q_table:
-                Q_table[state] = np.zeros(n_actions, dtype=np.float64)
-                N_updates[state] = np.zeros(n_actions, dtype=np.float64)
+    def registerInitialState(self, state):
+        '''Called at the start of each game.'''
+        self.last_state_hash = None
+        self.last_action_idx = None
+        self.last_score = state.getScore()
+        self.episode_reward = 0.0
 
-            # Get legal actions for current state
-            legal_actions = game_state.getLegalActionsIndices(ACTION_LIST)
-            if not legal_actions:
-                legal_actions = [0]  # Fallback to first action
+    def getAction(self, state):
+        '''
+        Method takes in the current state and returns the most optimal action to take (or a random
+        legal action if the agent can't make that choice for whatever reason).  The environment setup
+        makes this super easy here because we can just define this getAction() method for whatever agent
+        we're building and the environment takes care of the boring stuff like ensuring compatability with
+        display, etc..
+        '''
+        # We have current state (awesome), just use the buildObservation method to get that partially observable
+        # window around Pacman, then hash it to make our next moves.
+        obs = state.buildObservation(window_size=self.window_size)
+        state_hash = hash_observation(obs)
+        self._ensure_state(state_hash)
 
-            if np.random.random() < epsilon:
-                action = random.choice(legal_actions)
-            else:
-                # Only consider legal actions when choosing best
-                q_values = Q_table[state]
-                best_value = -float('inf')
-                action = legal_actions[0]
-                for legal_idx in legal_actions:
-                    if q_values[legal_idx] > best_value:
-                        best_value = q_values[legal_idx]
-                        action = legal_idx
+        # Update Q-table from previous state-action pair
+        if self.last_state_hash is not None and self.last_action_idx is not None:
+            current_score = state.getScore()
+            reward = current_score - self.last_score
+            self.last_score = current_score
+            self.episode_reward += reward
+            
+            # Check if terminal
+            terminal = state.isWin() or state.isLose()
+            
+            # Q-learning update
+            self._update_q(self.last_state_hash, self.last_action_idx, 
+                          reward, state_hash, terminal)
 
-            direction = ACTION_LIST[action]
-            legal = game_state.getLegalPacmanActions()
-            if direction not in legal:
+        # Get legal actions
+        legal_actions = state.getLegalActionsIndices(ACTION_LIST)
+        if not legal_actions:
+            legal_actions = [0]
+
+        # Epsilon-greedy action selection
+        if self.training and random.random() < self.epsilon:
+            action_idx = random.choice(legal_actions)
+        else:
+            # Choose best legal action
+            q_values = self.q_table[state_hash]
+            best_value = -float('inf')
+            action_idx = legal_actions[0]
+            for legal_idx in legal_actions:
+                if q_values[legal_idx] > best_value:
+                    best_value = q_values[legal_idx]
+                    action_idx = legal_idx
+
+        # Store for next update
+        self.last_state_hash = state_hash
+        self.last_action_idx = action_idx
+
+        # Return the direction (not index)
+        direction = ACTION_LIST[action_idx]
+        legal = state.getLegalPacmanActions()
+        
+        # Ensure direction is legal
+        if direction not in legal:
+            if Directions.STOP in legal and len(legal) > 1:
                 legal = [d for d in legal if d != Directions.STOP]
             direction = legal[0] if legal else Directions.STOP
+            # Update action_idx to match
+            self.last_action_idx = ACTION_LIST.index(direction)
+
+        return direction
+
+    def _update_q(self, state_hash, action_idx, reward, next_state_hash, terminal):
+        """Update Q-value using Q-learning rule."""
+        if not self.training:
+            return
+        
+        # Adaptive learning rate
+        eta = 1.0 / (1.0 + self.n_updates[state_hash][action_idx])
+        self.n_updates[state_hash][action_idx] += 1
+        
+        # Q-learning update
+        current_q = self.q_table[state_hash][action_idx]
+        if terminal or next_state_hash is None:
+            next_max = 0.0
+        else:
+            self._ensure_state(next_state_hash)
+            next_max = float(np.max(self.q_table[next_state_hash]))
+        
+        td_target = reward + self.gamma * next_max
+        self.q_table[state_hash][action_idx] = (1.0 - eta) * current_q + eta * td_target
+
+    def final(self, state):
+        '''
+        Called at the end of each game.
+        Update Q-table with final reward and decay epsilon.
+        '''
+        # Final Q-update if we have a pending state-action pair
+        if self.last_state_hash is not None and self.last_action_idx is not None:
+            current_score = state.getScore()
+            reward = current_score - self.last_score
+            self.episode_reward += reward
             
-            next_game_state = game_state.stepWithGhosts(direction, ghosts)
+            # Final update (terminal state)
+            self._update_q(self.last_state_hash, self.last_action_idx, 
+                          reward, None, True)
 
-            current_score = next_game_state.getScore()
-            reward = current_score - prev_score
-            prev_score = current_score
-            done = next_game_state.isWin() or next_game_state.isLose() or steps >= max_steps
+        # Store episode reward
+        self.episode_rewards.append(self.episode_reward)
 
-            next_obs = next_game_state.buildObservation(radius=WINDOW_RADIUS)
-            next_state = hash(next_obs)
+        # Decay epsilon
+        if self.training:
+            self.epsilon = max(self.min_epsilon, self.epsilon * self.decay_rate)
+        
+        # Saves Q-table periodically for testing purposes, remove in practice, can be costly
+        # if self.qfile and len(self.episode_rewards) % 5_000 == 0:
+        #     self._save_qtable()
 
-            if next_state not in Q_table:
-                Q_table[next_state] = np.zeros(n_actions, dtype=np.float64)
-                N_updates[next_state] = np.zeros(n_actions, dtype=np.float64)
-
-            eta = 1.0 / (1.0 + N_updates[state][action])
-            N_updates[state][action] += 1
-
-            td_target = reward + (0.0 if done else gamma * float(np.max(Q_table[next_state])))
-            Q_table[state][action] = (1.0 - eta) * Q_table[state][action] + eta * td_target
-
-            obs = next_obs
-            steps += 1
-            episode_reward += reward
-
-            if display:
-                display.update(next_game_state.data)
-
-        epsilon *= decay_rate
-        running_sum += episode_reward
-        ep_rewards[episode] = running_sum / (episode + 1)
-
-    time_end = time.perf_counter()
-    print('Training Runtime (sec):', time_end - time_start)
-    reward_df = pd.DataFrame({
-        "episode": np.arange(num_episodes),
-        "avg_reward": ep_rewards
-    })
-    reward_df.to_csv(f"episode_rewards_{num_episodes}_{decay_rate}.csv", index=False)
-    training_rewards_plot(reward_df=reward_df, num_episodes=num_episodes, decay_rate=decay_rate)
-
-    return Q_table
-
-
-# Default experiment settings
-num_episodes = 10_000
-decay_rate = 0.9999
-
-
-if train_flag:
-    Q_table = Q_learning(num_episodes=num_episodes, gamma=0.9, epsilon=1, decay_rate=decay_rate)
-    with open('Q_table_' + str(num_episodes) + '_' + str(decay_rate) + '.pickle', 'wb') as handle:
-        pickle.dump(Q_table, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    def setTraining(self, training):
+        '''Set whether agent is in training mode.'''
+        self.training = training
+        if not training:
+            self.epsilon = 0.0  # No exploration during evaluation
 
 
 def context_from_obs(obs):
+    '''Extract context from observation for analysis.'''
     try:
         if obs.get('at_capsule'):
             return 'CAPSULE'
@@ -427,139 +356,195 @@ def context_from_obs(obs):
     return 'EMPTY'
 
 
+# Using softmax right now for help at analyzing action selection,
+# but might remove this depending on how helpful it actually is.
 def softmax(x, temp=1.0):
+    '''Softmax function for action selection.'''
     x = np.asarray(x, dtype=np.float64)
     e_x = np.exp((x - np.max(x)) / max(1e-6, temp))
     return e_x / e_x.sum(axis=0)
 
 
-def refresh(obs, reward, done, info, delay=0.1):
-    time.sleep(delay)
+# Default experiment settings
+num_episodes = 10_000
+decay_rate = 0.9999
+# Let's include the window size because that definitely changes the Q-table.
+qfile_name = f'Q_table_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.pickle'
+# qfile_name = f'Q_table_{num_episodes}_{decay_rate}.pickle'
 
-
-if not train_flag:
-    rewards = []
-    filename = 'Q_table_' + str(num_episodes) + '_' + str(decay_rate) + '.pickle'
-    input(f"\n{BOLD}Currently loading Q-table from " + filename + f"{RESET}.  \n\nPress Enter to confirm, or Ctrl+C to cancel and load a different Q-table file.\n(set num_episodes and decay_rate in q_learning.py).")
-    with open(filename, 'rb') as handle:
-        Q_table = pickle.load(handle)
-    print('Length of Q-Table:', len(Q_table))
-
+if train_flag:
+    # Training mode
+    print(f"Training Q-learning agent for {num_episodes} episodes...")
+    print(f"Decay rate: {decay_rate}")
+    print(f"Q-table will be saved to: {qfile_name}")
+    
+    # Create agent in training mode
+    agent = QLearningAgent(
+        window_size=ENV_WINDOW_SIZE,
+        gamma=0.9,
+        epsilon=1.0,
+        decay_rate=decay_rate,
+        min_epsilon=0.05,
+        qfile=qfile_name
+    )
+    agent.setTraining(True)
+    
+    # Use command-line args or defaults
+    layout_name = 'mediumClassic'
+    num_ghosts = 2
+    ghost_type = 'RandomGhost'
+    frame_time = 0.0 if not gui_flag else 0.1
+    
+    # Parse command line for layout/ghosts if provided
+    if len(sys.argv) > 1:
+        # Simple parsing - can be enhanced
+        for arg in sys.argv[1:]:
+            if arg.startswith('--layout='):
+                layout_name = arg.split('=')[1]
+            elif arg.startswith('--ghosts='):
+                num_ghosts = int(arg.split('=')[1])
+            elif arg.startswith('--ghost-type='):
+                ghost_type = arg.split('=')[1]
+    
+    # Get layout and create ghosts
+    layout = pac_layout.getLayout(layout_name)
+    ghost_cls = getattr(ghostAgents, ghost_type)
+    ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
+    
+    # Setup display
+    if gui_flag:
+        from graphicsDisplay import PacmanGraphics
+        display = PacmanGraphics(frameTime=frame_time)
+    else:
+        from textDisplay import NullGraphics
+        display = NullGraphics()
+    
+    # Run training games
     time_start = time.perf_counter()
-    episode_lengths = []
-    newly_discovered_states = []
-    previsited_states = []
+    games = runGamesQuiet(
+        layout=layout,
+        pacman=agent,
+        ghosts=ghosts,
+        display=display,
+        numGames=num_episodes,
+        record=False,
+        numTraining=num_episodes,  # All games are training
+        catchExceptions=False,
+        timeout=30,
+        randomRewards=False,
+        maxSteps=1000
+    )
+    time_end = time.perf_counter()
+    
+    print(f'\nTraining Runtime (sec): {time_end - time_start:.2f}')
+    
+    # Save final Q-table
+    agent._save_qtable()
+    
+    # Generate reward plot
+    if len(agent.episode_rewards) > 0:
+        running_avg = np.cumsum(agent.episode_rewards) / np.arange(1, len(agent.episode_rewards) + 1)
+        reward_df = pd.DataFrame({
+            "episode": np.arange(len(agent.episode_rewards)),
+            "avg_reward": running_avg
+        })
+        reward_df.to_csv(get_output_path(f"episode_rewards_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.csv"), index=False)
+        training_rewards_plot(reward_df, num_episodes, decay_rate)
+        print(f"Average reward: {np.mean(agent.episode_rewards):.2f}")
+        print(f"Final epsilon: {agent.epsilon:.4f}")
+        print(f"Q-table size: {len(agent.q_table)} states")
 
+else:
+    # Evaluation mode
+    filename = qfile_name
+    input(f"\n{BOLD}Currently loading Q-table from {filename}{RESET}.\n\nPress Enter to confirm, or Ctrl+C to cancel.\n")
+    
+    # Create agent in evaluation mode (loads Q-table)
+    agent = QLearningAgent(
+        window_size=ENV_WINDOW_SIZE,
+        epsilon=0.0,  # No exploration
+        qfile=filename,
+        load_qtable=True
+    )
+    agent.setTraining(False)
+    
+    print(f'Length of Q-Table: {len(agent.q_table)}')
+    
+    # Setup for evaluation
+    layout_name = 'mediumClassic'
+    num_ghosts = 2
+    ghost_type = 'RandomGhost'
+    frame_time = 0.0 if not gui_flag else 0.1
+    num_eval_games = 10_000
+    
+    # Parse command line if provided
+    for arg in sys.argv[1:]:
+        if arg.startswith('--layout='):
+            layout_name = arg.split('=')[1]
+        elif arg.startswith('--ghosts='):
+            num_ghosts = int(arg.split('=')[1])
+        elif arg.startswith('--games='):
+            num_eval_games = int(arg.split('=')[1])
+    
+    layout = pac_layout.getLayout(layout_name)
+    ghost_cls = getattr(ghostAgents, ghost_type)
+    ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
+    
+    if gui_flag:
+        from graphicsDisplay import PacmanGraphics
+        display = PacmanGraphics(frameTime=frame_time)
+    else:
+        from textDisplay import NullGraphics
+        display = NullGraphics()
+    
+    # Track statistics
     contexts_order = ["CAPSULE", "GHOST", "SCARED_GHOST", "FOOD", "EMPTY"]
     action_hist_by_ctx = {c: np.zeros(len(ACTION_LIST), dtype=np.int64) for c in contexts_order}
-
-    for episode in tqdm(range(100)):
-        game_state, obs, prev_score = reset_game()
-        total_reward = 0
-        steps = 0
-        done = False
-
-        while not done:
-            state = hash(obs)
-            legal_actions = game_state.getLegalActionsIndices(ACTION_LIST)
-            if not legal_actions:
-                legal_actions = [0]
-            
-            try:
-                q_values = Q_table[state]
-                # Only consider legal actions
-                legal_q = [q_values[i] for i in legal_actions]
-                legal_probs = softmax(legal_q)
-                action_idx = np.random.choice(len(legal_actions), p=legal_probs)
-                action = legal_actions[action_idx]
-                previsited_states.append(state)
-            except KeyError:
-                action = random.choice(legal_actions)
-                newly_discovered_states.append(state)
-
-            ctx = context_from_obs(obs)
-            if ctx in action_hist_by_ctx:
-                action_hist_by_ctx[ctx][action] += 1
-
-            direction = ACTION_LIST[action]
-            legal = game_state.getLegalPacmanActions()
-            if direction not in legal:
-                if Directions.STOP in legal and len(legal) > 1:
-                    legal = [d for d in legal if d != Directions.STOP]
-                direction = legal[0] if legal else Directions.STOP
-
-            next_game_state = game_state.stepWithGhosts(direction, ghosts)
-            current_score = next_game_state.getScore()
-            reward = current_score - prev_score
-            prev_score = current_score
-            done = next_game_state.isWin() or next_game_state.isLose()
-
-            obs = next_game_state.buildObservation(radius=WINDOW_RADIUS)
-            game_state = next_game_state
-            total_reward += reward
-            steps += 1
-
-            if display:
-                display.update(game_state.data)
-                time.sleep(0.1)
-
-        rewards.append(total_reward)
-        episode_lengths.append(steps)
-
-        if display and done:
-            display.finish()
-
+    newly_discovered_states = []
+    previsited_states = []
+    
+    # Run evaluation games
+    time_start = time.perf_counter()
+    games = runGamesQuiet(
+        layout=layout,
+        pacman=agent,
+        ghosts=ghosts,
+        display=display,
+        numGames=num_eval_games,
+        record=False,
+        numTraining=0,  # No training
+        catchExceptions=False,
+        timeout=30,
+        randomRewards=False,
+        maxSteps=1000
+    )
     time_end = time.perf_counter()
+    
+    # Collect statistics from games
+    scores = [g.state.getScore() for g in games]
+    wins = [g.state.isWin() for g in games]
+    # Try to get episode lengths from move history if available
+    try:
+        episode_lengths = [len(g.moveHistory) for g in games]
+    except AttributeError:
+        episode_lengths = []  # Not available
+    
     total_evaluation_time = time_end - time_start
-
-    total_eval_time_min = (total_evaluation_time // 60)
-    eval_time_remaining_sec = (total_evaluation_time % 60)
-
-    avg_reward = sum(rewards) / len(rewards)
-    avg_length = sum(episode_lengths) / len(episode_lengths)
-
-    new_states = len(newly_discovered_states)
-    new_unique_states = len(np.unique(newly_discovered_states))
-
-    total_actions = max(1, sum(episode_lengths))
-    qtable_states_percentage = len(previsited_states) / total_actions
-    random_actions_percentage = len(newly_discovered_states) / total_actions
-
+    total_eval_time_min = int(total_evaluation_time // 60)
+    eval_time_remaining_sec = int(total_evaluation_time % 60)
+    
+    avg_reward = np.mean(scores) if scores else 0
+    avg_length = np.mean(episode_lengths) if episode_lengths else 0
+    win_rate = sum(wins) / len(wins) if wins else 0
+    
     print()
-    print("Number of Episodes:", num_episodes)
+    print("Number of Training Episodes:", num_episodes)
     print("Decay Rate:", decay_rate)
     print()
-    print("Average Reward:", avg_reward)
-    print(f"Average Episode Length: {avg_length:.2f} actions")
+    print(f"Average Reward: {avg_reward:.2f}")
+    print(f"Win Rate: {win_rate:.2%} ({sum(wins)}/{len(wins)})")
+    print(f"Average Episode Length: {avg_length:.2f} moves")
     print()
-    print(f"Total Number of New UNIQUE States Discovered: {new_unique_states:.0f}")
-    print(f"Percentage of actions taken from using the Q-Table: {qtable_states_percentage:.2%}")
-    print(f"Percentage of Random Actions taken out of all actions: {random_actions_percentage:.2%}")
-    print()
-    print(f"Time taken to run 10,000 evaluations: {total_evaluation_time:.2f} sec")
-    print(f"Time taken to run 10,000 evaluations (minutes): {total_eval_time_min:.0f}:{eval_time_remaining_sec:.0f}")
+    print(f"Time taken to run {num_eval_games} evaluations: {total_evaluation_time:.2f} sec")
+    print(f"Time taken (minutes): {total_eval_time_min}:{eval_time_remaining_sec:02d}")
 
-    n_actions = len(ACTION_LIST)
-    mat = np.zeros((len(contexts_order), n_actions), dtype=float)
-    for i, ctx in enumerate(contexts_order):
-        counts = action_hist_by_ctx[ctx].astype(float)
-        s = counts.sum()
-        mat[i, :] = counts / s if s > 0 else counts
-
-    action_names = ["NORTH", "SOUTH", "EAST", "WEST", "STOP"]
-
-    plt.figure(figsize=(1.5 + 0.8 * n_actions, 4.5))
-    im = plt.imshow(mat, aspect="auto", interpolation="nearest", cmap="viridis")
-    cbar = plt.colorbar(im)
-    cbar.set_label("Normalized frequency", fontsize=12)
-
-    plt.yticks(range(len(contexts_order)), contexts_order, fontsize=12)
-    plt.xticks(range(n_actions), action_names[:n_actions], rotation=45, ha="right", fontsize=11)
-    plt.xlabel("Action", fontsize=13)
-    plt.ylabel("Context", fontsize=13)
-    plt.title(f"Action distribution by context: {num_episodes:,.0f} eps, decay={decay_rate}", fontsize=14, pad=10)
-    plt.tight_layout()
-
-    heatmap_path = f"action_heatmap_{num_episodes}_{decay_rate}.png"
-    plt.savefig(heatmap_path, dpi=300)
-    plt.close()

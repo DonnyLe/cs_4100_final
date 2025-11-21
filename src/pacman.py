@@ -119,6 +119,9 @@ class GameState:
 
         # Time passes
         if agentIndex == 0:
+            # Here is where the time penalty is applied.  Let's get rid of this,
+            # or maybe parameterize it?  Because there's no way this is helpful
+            # for our q-learning agent.
             state.data.scoreChange += -TIME_PENALTY  # Penalty for waiting around
             # Increment step counter when pacman moves (one step per turn)
             state.data.steps += 1
@@ -365,7 +368,8 @@ class GameState:
 
 SCARED_TIME = 40    # Moves ghosts are scared
 COLLISION_TOLERANCE = 0.7  # How close ghosts must be to Pacman to kill
-TIME_PENALTY = 1  # Number of points lost each round
+# TIME_PENALTY = 1  # Number of points lost each round
+TIME_PENALTY = 0
 
 
 class ClassicGameRules:
