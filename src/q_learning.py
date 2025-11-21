@@ -22,10 +22,12 @@ RESET = '\033[0m'
 
 ACTION_LIST = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST, Directions.STOP]
 
-# ENV_WINDOW_SIZE = 2  # Play with this parameter to test different observation windows
-ENV_WINDOW_SIZE = 3  # Let's try 3, this would be a 7x7 observation window, so pretty big... idk i'm curious if he'll do better
+ENV_WINDOW_SIZE = 2  # Play with this parameter to test different observation windows
+# ENV_WINDOW_SIZE = 3  # Let's try 3, this would be a 7x7 observation window, so pretty big... idk i'm curious if he'll do better
 
 OUTPUT_DIR = 'q_learning_data'  # Just ensuring we output every file to one folder to keep things clean and organized
+
+MAX_STEPS = 1000 # Let's use this parameter to control our max_steps for the agent, let's start by decreasing to 500
 
 # Just some functionality for ensuring we output files to the right place
 def ensure_output_dir():
@@ -46,12 +48,12 @@ gui_flag = 'gui' in sys.argv
 # the exact same function), but it contains functionality for:
 # a. Ensuring we don't actually print out the "Pacman died!" stuff every time we run a game.
 # b. Displaying or not displaying the GUI depending on the flag we give in the terminal.
-def runGamesQuiet(layout, pacman, ghosts, display, numGames, record, numTraining=0, catchExceptions=False, timeout=30, randomRewards=False, maxSteps=None):
+def runGamesQuiet(layout, pacman, ghosts, display, numGames, record, numTraining=0, catchExceptions=False, timeout=30, randomRewards=False, max_steps=MAX_STEPS):
     '''
     Wrapper around runGames that suppresses all game output messages.
     '''
     
-    rules = ClassicGameRules(timeout, randomRewards=randomRewards, maxSteps=maxSteps)
+    rules = ClassicGameRules(timeout, randomRewards=randomRewards, maxSteps=max_steps)
     rules.quiet = True  # This is the parameter to stop the "Pacman died!" stuff
     games = []
 
@@ -366,8 +368,8 @@ def softmax(x, temp=1.0):
 
 
 # Default experiment settings
-num_episodes = 10_000
-decay_rate = 0.9999
+num_episodes = 25_000
+decay_rate = 0.99995
 # Let's include the window size because that definitely changes the Q-table.
 qfile_name = f'Q_table_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.pickle'
 # qfile_name = f'Q_table_{num_episodes}_{decay_rate}.pickle'
@@ -393,7 +395,7 @@ if train_flag:
     layout_name = 'mediumClassic'
     num_ghosts = 2
     ghost_type = 'RandomGhost'
-    frame_time = 0.0 if not gui_flag else 0.1
+    frame_time = 0.0 if not gui_flag else 0.001
     
     # Parse command line for layout/ghosts if provided
     if len(sys.argv) > 1:
@@ -432,7 +434,7 @@ if train_flag:
         catchExceptions=False,
         timeout=30,
         randomRewards=False,
-        maxSteps=1000
+        max_steps=MAX_STEPS
     )
     time_end = time.perf_counter()
     
@@ -474,8 +476,8 @@ else:
     layout_name = 'mediumClassic'
     num_ghosts = 2
     ghost_type = 'RandomGhost'
-    frame_time = 0.0 if not gui_flag else 0.1
-    num_eval_games = 10_000
+    frame_time = 0.0 if not gui_flag else 0.001
+    num_eval_games = 100
     
     # Parse command line if provided
     for arg in sys.argv[1:]:
@@ -516,7 +518,7 @@ else:
         catchExceptions=False,
         timeout=30,
         randomRewards=False,
-        maxSteps=1000
+        max_steps=MAX_STEPS
     )
     time_end = time.perf_counter()
     
