@@ -30,7 +30,8 @@ class Layout:
         self.width = len(layoutText[0])
         self.height = len(layoutText)
         self.walls = Grid(self.width, self.height, False)
-        self.food = Grid(self.width, self.height, False)
+        self.food = Grid(self.width, self.height, 0)
+
         self.capsules = []
         self.agentPositions = []
         self.numGhosts = 0
@@ -124,7 +125,7 @@ class Layout:
         if layoutChar == '%':
             self.walls[x][y] = True
         elif layoutChar == '.':
-            self.food[x][y] = True
+            self.food[x][y] = 10
         elif layoutChar == 'o':
             self.capsules.append((x, y))
         elif layoutChar == 'P':

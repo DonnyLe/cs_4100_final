@@ -549,14 +549,14 @@ class GameStateData:
             import random
             for x in range(self.food.width):
                 for y in range(self.food.height):
-                    if self.food[x][y]:  # If there's a pellet
+                    if self.food[x][y] > 0:  # pellet present
                         # Weighted distribution: favor extremes
                         rand = random.random()
-                        if rand < 0.4:  # 40% chance for low rewards (0-5)
+                        if rand < 0.4:      # 40% chance for low rewards (0-5)
                             self.food[x][y] = random.randint(0, 5)
-                        elif rand < 0.8:  # 40% chance for high rewards (25-30)
+                        elif rand < 0.8:    # 40% chance for high rewards (25-30)
                             self.food[x][y] = random.randint(25, 30)
-                        else:  # 20% chance for medium rewards (6-24)
+                        else:               # 20% chance for medium rewards (6-24)
                             self.food[x][y] = random.randint(6, 24)
         #self.capsules = []
         self.capsules = layout.capsules[:]

@@ -340,6 +340,85 @@ class GameState:
             'scared_ghost_in_cell': any(ghost_map.get((px, py), [])),
             'window_size': window_size,
         }
+    
+
+
+    def buildFullObservation(self):
+        """
+        Fully observable state representation for Deep Q-Learning.
+
+        Returns a dict with:
+          - 'pacman_position': (px, py)
+          - 'grid': {(x, y) -> cell dict}
+          - 'width', 'height'
+
+        Each cell dict has:
+          - in_bounds: bool
+          - wall: bool
+          - food: bool
+          - food_value: int (0 = none, >0 = pellet reward)
+          - capsule: bool
+          - ghosts: list (one entry per non-scared ghost)
+          - scared_ghosts: list (one entry per scared ghost)
+        """
+        current_position = self.getPacmanPosition()
+        px, py = int(round(current_position[0])), int(round(current_position[1]))
+
+        walls = self.getWalls()
+        food = self.getFood()  # integer grid: 0 = empty, >0 = reward
+        capsules = set((int(x), int(y)) for x, y in self.getCapsules())
+
+        width, height = walls.width, walls.height
+
+        # Map (x, y) -> list of ghost states (scared or not)
+        ghost_map = {}
+        for ghost_state in self.getGhostStates():
+            gpos = ghost_state.getPosition()
+            if gpos is None:
+                continue
+            gx, gy = nearestPoint(gpos)
+            gx, gy = int(gx), int(gy)
+            ghost_map.setdefault((gx, gy), []).append(ghost_state.scaredTimer > 0)
+
+        grid = {}
+        for x in range(width):
+            for y in range(height):
+                in_bounds = True  # by definition, all (x, y) in this range are in bounds
+                cell = {
+                    'in_bounds': in_bounds,
+                    'wall': False,
+                    'food': False,
+                    'food_value': 0,
+                    'capsule': False,
+                    'ghosts': [],
+                    'scared_ghosts': [],
+                }
+
+                cell['wall'] = walls[x][y]
+
+                # food[x][y] is an int: 0 = empty, >0 = pellet reward
+                val = food[x][y]
+                if val > 0:
+                    cell['food'] = True
+                    cell['food_value'] = int(val)
+
+                cell['capsule'] = (x, y) in capsules
+
+                for scared in ghost_map.get((x, y), []):
+                    if scared:
+                        cell['scared_ghosts'].append(True)
+                    else:
+                        cell['ghosts'].append(True)
+
+                grid[(x, y)] = cell
+
+        return {
+            'pacman_position': (px, py),
+            'grid': grid,
+            'width': width,
+            'height': height,
+        }
+
 
     def stepWithGhosts(self, pacman_action, ghost_agents):
         '''
@@ -485,21 +564,22 @@ class PacmanRules:
     def consume(position, state):
         x, y = position
         # Eat food
-        if state.data.food[x][y]:
-            # Get the reward value from the pellet (default 10, or integer value if randomRewards enabled)
-            # Use type() check because isinstance(True, int) returns True (booleans are int subclass)
-            reward = state.data.food[x][y] if type(state.data.food[x][y]) == int else 10
+        x, y = position
+        val = state.data.food[x][y]
+        if val > 0:
+            reward = val
             state.data.scoreChange += reward
             state.data.food = state.data.food.copy()
-            state.data.food[x][y] = False
+            state.data.food[x][y] = 0      # 0 = empty
             state.data._foodEaten = position
             # TODO: cache numFood?
             numFood = state.getNumFood()
             if numFood == 0 and not state.data._lose:
                 state.data.scoreChange += 500
                 state.data._win = True
+
         # Eat capsule
-        if(position in state.getCapsules()):
+        if (position in state.getCapsules()):
             state.data.capsules.remove(position)
             state.data._capsuleEaten = position
             # Reset all ghosts' scared timers
@@ -654,6 +734,15 @@ def readCommand(argv):
                       help=default(
                           'the agent TYPE in the pacmanAgents module to use'),
                       metavar='TYPE', default='KeyboardAgent')
+    parser.add_option('--algo', dest='algo',
+                  help='RL algorithm: q or dqn',
+                  choices=['q', 'dqn'], default=None)
+    parser.add_option('--mode', dest='mode',
+                    help='RL mode: train or eval',
+                    choices=['train', 'eval'], default=None)
+    parser.add_option('--qfile', dest='qfile',
+                    help='Q-table filename (for Q-learning eval)', default=None)
+
     parser.add_option('-t', '--textGraphics', action='store_true', dest='textGraphics',
                       help='Display output as text only', default=False)
     parser.add_option('-q', '--quietTextGraphics', action='store_true', dest='quietGraphics',
