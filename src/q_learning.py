@@ -60,6 +60,9 @@ def runGamesQuiet(layout, pacman, ghosts, display, numGames, record, numTraining
     use_gui = isinstance(display, PacmanGraphics)
     
     for i in tqdm(range(numGames), desc="Games", unit="game"):
+        # Clears the gameState from memory so we're not stacking up.
+        GameState.getAndResetExplored()
+
         # To suppress output from the OG setup, we need to use NullGraphics
         if use_gui:
             gameDisplay = display
@@ -458,7 +461,7 @@ if train_flag:
     layout_name = 'mediumClassic'
     num_ghosts = 2
     ghost_type = 'RandomGhost'
-    frame_time = 0.0 if not gui_flag else 0.1
+    frame_time = 0.0 if not gui_flag else 0.01
     
     # Parse command line for layout/ghosts if provided
     if len(sys.argv) > 1:
@@ -541,7 +544,7 @@ else:
     layout_name = 'mediumClassic'
     num_ghosts = 2
     ghost_type = 'RandomGhost'
-    frame_time = 0.0 if not gui_flag else 0.001
+    frame_time = 0.0 if not gui_flag else 0.01
     num_eval_games = 10_000
     
     # Parse command line if provided

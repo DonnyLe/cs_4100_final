@@ -263,8 +263,9 @@ class PacmanGraphics:
         self.infoPane.setFrameTime(self.frameTime)
         
         # Initialize timer display
-        if state.maxSteps is not None:
-            self.infoPane.updateTimer(state.steps, state.maxSteps)
+        # Commenting this out for demo purposes.
+        # if state.maxSteps is not None:
+        #     self.infoPane.updateTimer(state.steps, state.maxSteps)
 
         self.previousState = state
 
@@ -346,7 +347,8 @@ class PacmanGraphics:
             self.removeCapsule(newState._capsuleEaten, self.capsules)
         self.infoPane.updateScore(newState.score)
         # Update timer with step countdown
-        self.infoPane.updateTimer(newState.steps, newState.maxSteps)
+        # Commenting this out for demo purposes.
+        # self.infoPane.updateTimer(newState.steps, newState.maxSteps)
         if 'ghostDistances' in dir(newState):
             self.infoPane.updateGhostDistances(newState.ghostDistances)
 
@@ -359,7 +361,7 @@ class PacmanGraphics:
         begin_graphics(screen_width,
                        screen_height,
                        BACKGROUND_COLOR,
-                       "CS188 Pacman")
+                       "CS4100: Team 14 Pacman - Fall 2025")
 
     def drawPacman(self, pacman, index):
         position = self.getPosition(pacman)
