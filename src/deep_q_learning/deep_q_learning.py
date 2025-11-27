@@ -36,11 +36,11 @@ class DeepQLearningAgent(Agent):
     """
 
     # Hyperparameters
-    learning_rate = 1e-3
+    learning_rate = 0.001
     discount_factor = 0.99
-    replay_memory_size = 50_000
+    replay_memory_size = 50000
     batch_size = 64
-    target_sync_steps = 1_000
+    target_sync_steps = 1000
 
     # Exploration
     initial_epsilon = 1.0
@@ -215,7 +215,6 @@ class DeepQLearningAgent(Agent):
         obs = state.buildFullObservation()
         state_tensor = encode_full_observation_cnn(obs).float()
 
-        # Training: store transition and learn (only at intersections!)
         if self.training and self.last_state_tensor is not None and self.last_action_idx is not None:
             current_score = state.getScore()
             game_reward = current_score - self.last_score

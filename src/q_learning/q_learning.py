@@ -297,18 +297,3 @@ class QLearningAgent(Agent):
             self.epsilon = 0.0  # No exploration during evaluation
 
 
-def context_from_obs(obs):
-    '''Extract context from observation for analysis.'''
-    try:
-        if obs.get('at_capsule'):
-            return 'CAPSULE'
-        if obs.get('ghost_in_cell'):
-            return 'GHOST'
-        if obs.get('scared_ghost_in_cell'):
-            return 'SCARED_GHOST'
-        if obs.get('at_food'):
-            return 'FOOD'
-    except Exception:
-        pass
-    return 'EMPTY'
-
