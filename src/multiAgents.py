@@ -328,8 +328,8 @@ class LocalQAgent(Agent):
 
         getAction chooses among the best options according to the evaluation function.
 
-        Just like in the previous project, getAction takes a GameState and returns
-        some Directions.X for some X in the set {NORTH, SOUTH, WEST, EAST, STOP}
+        getAction takes a GameState and returns some Directions.X for some X
+        in the set {NORTH, SOUTH, WEST, EAST, STOP}
         """
         # Collect legal moves and successor states
         legalMoves = gameState.getLegalActions()
@@ -561,109 +561,141 @@ class MultiAgentSearchAgent(Agent):
 
 class MinimaxAgent(MultiAgentSearchAgent):
     """
-    Your minimax agent (question 2)
+    Minimax agent implementation where Pacman is considered the maximizing player and the Ghosts are
+    sequentially looped through as the minimizing player(s). As we discussed in class, the Max player
+    goes first and the game continues in an alternating fashion until a terminal state is achieved (Pacman
+    wins or loses the game).
     """
-    # do we make this a field?
-    maximize = True
-    action = None
-    weights = np.loadtxt("weights.csv", delimiter=",")
-    new_weights = np.array(weights)
+    def utility(self, gameState):
+        """
+        Initial utility function for minimax: adds rewards for eating pellets, penalizes danger (ghosts),
+        reward being close to food.
+        """
+
+        # terminal states - game is already won/lost
+        if gameState.isWin():
+            return float("inf")
+        if gameState.isLose():
+            return -float("inf")
+
+        score = gameState.getScore()
+        pacman = gameState.getPacmanPosition()
+        ghosts = gameState.getGhostPositions()
+        food = gameState.getFood().asList()
+        capsules = gameState.getCapsules()
+
+        # penalize getting closer to ghosts
+        for g in ghosts:
+            gPos = g.getPosition()
+            gDistance = util.manhattanDistance(pacman, gPos)
+
+        if g.scaredTimer > 0:
+            # if ghost is scared, Pacman should be rewarded for getting closer to it
+            if gDistance > 0:
+                score += 200.0 / gDistance
+
+        else :
+            # varying levels of penalties depending on proximity
+            if gDistance <= 1:
+                score -= 500
+            elif gDistance <= 2:
+                score -= 50
+            else:
+                score -= 1.0 / gDistance
+            
+        # reward for getting closer to food
+        if food:
+            closestFoodDist = min(util.manhattanDistance(pacman, f) for f in food)
+            score += 40.0 / (closestFoodDist + 1e-6)
+
+        # reward for getting closer to pellets
+        if capsules:
+            closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
+            score += 20.0 / (closestCap + 1e-6)
+
+        # penalize stalling / oscillation
+        # - came from initial observations of Pacman getting stuck at walls/doing back-and-forth motions
+        score -= len(food) * 0.1  # pressures Pacman to finish the level
+        score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
+    
+    def _minimax_decision(self, gameState, depth=2):
+        """
+        Returns the best action for Pacman (agentIndex=0) using minimax.
+        """
+
+        legal = [a for a in gameState.getLegalActions(0) if a != Directions.STOP]
+        bestAction = None
+        bestValue = -float("inf")
+
+        for action in legal:
+            successor = gameState.generateSuccessor(0, action)
+            value = self.minimax(successor, depth, agentIndex=1)
+
+            if value > bestValue:
+                bestValue = value
+                bestAction = action
+
+        return bestAction
+    
+    def _minimax(self, state, depth, agentIndex):
+        """
+        Recursively computes minimax value for the given state using adverserial search.
+        """
+
+        # terminal state - just return the utility (objective function) value
+        if depth == 0 or state.isWin() or state.isLose():
+            return self.utility(state)
+
+        numAgents = state.getNumAgents()
+
+        # maximizing player - Pacman (agentIndex = 0)
+        if agentIndex == 0:
+            value = -float("inf")
+
+            for action in state.getLegalActions(0):
+                succ = state.generateSuccessor(0, action)
+                value = max(value,
+                            self.minimax(succ, depth, agentIndex=1))
+
+            return value
+
+        # minimizing player - Ghost (agentIndex >= 1)
+        else:
+            value = float("inf")
+
+            nextAgent = agentIndex + 1
+            nextDepth = depth
+
+            # once we reach the last ghost, cycle back to Pacman agent and decrease depth
+            if nextAgent == numAgents:
+                nextAgent = 0
+                nextDepth -= 1
+
+            for action in state.getLegalActions(agentIndex):
+                succ = state.generateSuccessor(agentIndex, action)
+
+                value = min(value,
+                            self.minimax(succ, nextDepth, nextAgent))
+
+            return value
 
     def getAction(self, gameState):
         """
         Returns the minimax action from the current gameState using self.depth
         and self.evaluationFunction.
-
-        Here are some method calls that might be useful when implementing minimax.
-
-        gameState.getLegalActions(agentIndex):
-        Returns a list of legal actions for an agent
-        agentIndex=0 means Pacman, ghosts are >= 1
-
-        gameState.generateSuccessor(agentIndex, action):
-        Returns the successor game state after an agent takes an action
-
-        gameState.getNumAgents():
-        Returns the total number of agents in the game
-
-        gameState.isWin():
-        Returns whether or not the game state is a winning state
-
-        gameState.isLose():
-        Returns whether or not the game state is a losing state
         """
-        "*** YOUR CODE HERE ***"
-        agentIndex = self.startingIndex
+        if hasattr(self, "lastPos") and gameState.getPacmanPosition() == self.lastPos:
+            self.stuckCounter = getattr(self, "stuckCounter", 0) + 1
+        else:
+            self.stuckCounter = 0
+
+        self.lastPos = gameState.getPacmanPosition()
         
-        
-
-        if self.parent == None:
-            action = gameState.getLegalActions(agentIndex)
-            return self.evaluationFunction(gameState, action, weights, new_weights)
-
-        
-        # instead of doing node.children, do node.parent?
-        if self.maximize:
-            reward = float('inf')
-            for parent in self.parent:
-                reward = max(reward, min) 
-            
-
-
-    """
-    def minimax(node, depth, maximizing_player): 
-        if depth == 0 or node.is_terminal(): 
-            return evaluate(node) 
-        if maximizing_player: # MAX player: 
-            maximize score value = -infinity 
-            for child in node.children: 
-                value = max(value, minimax(child, depth - 1, False)) 
-            return value 
-        else: # MIN player: 
-            minimize score value = +infinity 
-            for child in node.children: 
-                value = min(value, minimax(child, depth - 1, True)) 
-            return value
-    """
-
-    # returns value, stores optimal action to be called by getAction function
-    def minimax(self, depth, gameState):
-        if depth == 0 or self.parent == None:
-            self.action = gameState.getLegalActions(self.index)
-            return self.evaluationFunction(gameState, self.action, self.weights, self.new_weights)
-
-        # instead of doing node.children, do node.parent?
-        if self.maximize:
-            legalActions = gameState.getLegalActions(self.index)
-            reward = float('inf')
-            for parent in self.parent:
-                reward = max(reward, minimax(self.parent, depth, gameState))
-
-        return 0
-
-    def getOptimalAction(agentIndex, gameState):
-        legalActions = gameState.getLegalActions(agentIndex)
-
-        rewards = []
-        for action in legalActions:
-            [s,new_weights] = self.evaluationFunction(gameState, action, weights, new_weights)
-            scores.append(s)
-        
-        bestScore = max(scores)
-        allIndices = [index for index in range(len(scores))]
-        bestIndices = [index for index in range(len(scores)) if scores[index] == bestScore]
-        chosenIndex = random.choice(bestIndices) # Pick randomly among the best
-
-        # maybe train for less steps (~500-600 steps) with random pellet rewards
-
-        # check Pacman speed should be 0.5 so it can't outurn the ghost?
-
-        # window size ? 2x2?
-
-        # increasing penalty if no new pellet is eaten which resets once a pellet is eaten
-
-        # feature map?
-
+        return self.minimaxDecision(gameState, depth=2)
+    
+    # Notes:
+    # check Pacman speed should be 0.5 so it can't outurn the ghost?
+    # increasing penalty if no new pellet is eaten which resets once a pellet is eaten
 
 class AlphaBetaAgent(MultiAgentSearchAgent):
     """
