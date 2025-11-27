@@ -1,7 +1,7 @@
 import os
 from deep_q_learning.cnn import PacmanCNN, encode_full_observation_cnn
 from game import Agent, Directions
-from training_utils import get_output_path  # ADD THIS IMPORT
+from training_utils import get_output_path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -32,9 +32,10 @@ class ReplayMemory:
 class DeepQLearningAgent(Agent):
     """
     Deep Q-Learning agent for Pacman using a CNN over the full observable grid.
+    Optimized to only learn at grid intersections where decisions matter.
     """
 
-    # Hyperparameters (you can tweak)
+    # Hyperparameters
     learning_rate = 1e-3
     discount_factor = 0.99
     replay_memory_size = 50_000
@@ -56,7 +57,7 @@ class DeepQLearningAgent(Agent):
 
         self.n_actions = len(ACTION_LIST)
 
-        # Networks will be lazy-initialized when we see the first state
+        # Networks (lazy-initialized)
         self.policy_net = None
         self.target_net = None
         self.optimizer = None
@@ -64,11 +65,11 @@ class DeepQLearningAgent(Agent):
         # Replay memory
         self.memory = ReplayMemory(self.replay_memory_size)
 
-        # Epsilon / training flags
+        # Training state
         self.epsilon = self.initial_epsilon
         self.training = True
 
-        # For tracking across steps
+        # Tracking
         self.last_state_tensor = None
         self.last_action_idx = None
         self.last_score = 0.0
@@ -78,7 +79,6 @@ class DeepQLearningAgent(Agent):
         self.global_step = 0
 
         self.loss_fn = nn.MSELoss()
-
         self._pending_load = load_model
 
     def _init_networks_from_state(self, state):
@@ -89,8 +89,11 @@ class DeepQLearningAgent(Agent):
         layout = state.data.layout
         width, height = layout.width, layout.height
 
-        self.policy_net = PacmanCNN(width, height, self.n_actions).to(self.device)
-        self.target_net = PacmanCNN(width, height, self.n_actions).to(self.device)
+        # Use 6 channels (standard: walls but no food values)
+        in_channels = 6
+        
+        self.policy_net = PacmanCNN(width, height, self.n_actions, in_channels=in_channels).to(self.device)
+        self.target_net = PacmanCNN(width, height, self.n_actions, in_channels=in_channels).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
@@ -103,7 +106,7 @@ class DeepQLearningAgent(Agent):
     def _save_model(self):
         if not self.qfile or self.policy_net is None:
             return
-        path = get_output_path(self.qfile, agent_type='dqn')  
+        path = get_output_path(self.qfile, agent_type='dqn')
         torch.save(
             {
                 "policy_state_dict": self.policy_net.state_dict(),
@@ -199,30 +202,52 @@ class DeepQLearningAgent(Agent):
             self.target_net.load_state_dict(self.policy_net.state_dict())
 
     def getAction(self, state):
-        """Select and return an action."""
+        """
+        Select and return an action.
+        
+        OPTIMIZED: Only computes CNN and learns at grid intersections.
+        Between grids, returns the forced continuation action immediately.
+        """
         if self.policy_net is None:
             self._init_networks_from_state(state)
 
+        
         obs = state.buildFullObservation()
         state_tensor = encode_full_observation_cnn(obs).float()
 
-        if self.last_state_tensor is not None and self.last_action_idx is not None:
+        # Training: store transition and learn (only at intersections!)
+        if self.training and self.last_state_tensor is not None and self.last_action_idx is not None:
             current_score = state.getScore()
-            reward = current_score - self.last_score
+            game_reward = current_score - self.last_score
+        
+            # Shaped reward for learning
+            shaped_reward = game_reward
+            
+            # Penalty for wasting time (no progress)
+            if game_reward == -1:  # Only TIME_PENALTY
+                shaped_reward = -2
+            
+            # Bonus for eating food
+            elif game_reward > 0:  # Ate something!
+                shaped_reward = game_reward * 1.5  # Amplify positive rewards
+            
             self.last_score = current_score
-            self.episode_reward += reward
+        
+            self.episode_reward += shaped_reward
 
             done = state.isWin() or state.isLose()
             next_tensor = None if done else state_tensor
+            
             self.store_transition(
                 self.last_state_tensor,
                 self.last_action_idx,
                 next_tensor,
-                reward,
+                shaped_reward,
                 done,
             )
             self.optimize_policy()
-
+        
+        # Action selection (epsilon-greedy)
         legal_indices = state.getLegalActionsIndices(ACTION_LIST)
         if not legal_indices:
             legal_indices = [0]
@@ -239,6 +264,7 @@ class DeepQLearningAgent(Agent):
             best_idx = max(legal_indices, key=lambda i: q_vals[i])
             action_idx = int(best_idx)
 
+        # Store for next intersection
         self.last_state_tensor = state_tensor
         self.last_action_idx = action_idx
 
@@ -247,15 +273,23 @@ class DeepQLearningAgent(Agent):
 
     def final(self, state):
         """Called at the end of each game."""
-        if self.last_state_tensor is not None and self.last_action_idx is not None:
+        # Training: final transition and optimization
+        if self.training and self.last_state_tensor is not None and self.last_action_idx is not None:
             current_score = state.getScore()
             reward = current_score - self.last_score
+            
+            # Reward shaping
+            if reward == -1:
+                reward = -2
+            
             self.episode_reward += reward
 
             self.store_transition(self.last_state_tensor, self.last_action_idx, None, reward, True)
             self.optimize_policy()
 
+        # Track episode reward
         self.episode_rewards.append(self.episode_reward)
 
+        # Training: decay epsilon
         if self.training:
             self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
