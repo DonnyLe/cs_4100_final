@@ -216,8 +216,7 @@ class DeepQLearningAgent(Agent):
             self._init_networks_from_state(state)
 
         
-        obs = state.buildFullObservation()
-        state_tensor = encode_full_observation_cnn(obs).float()
+        state_tensor = state.buildFullObservationTensor().float().to(self.device)
 
         if self.training and self.last_state_tensor is not None and self.last_action_idx is not None:
             current_score = state.getScore()

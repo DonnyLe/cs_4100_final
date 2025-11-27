@@ -343,34 +343,33 @@ class GameState:
     
 
 
-    def buildFullObservation(self):
+    def buildFullObservationTensor(self):
         """
-        Fully observable state representation for Deep Q-Learning.
+        Fast path: directly build a (6, H, W) tensor for the CNN, avoiding
+        per-cell dicts and a second pass.
 
-        Returns a dict with:
-          - 'pacman_position': (px, py)
-          - 'grid': {(x, y) -> cell dict}
-          - 'width', 'height'
-
-        Each cell dict has:
-          - in_bounds: bool
-          - wall: bool
-          - food: bool
-          - food_value: int (0 = none, >0 = pellet reward)
-          - capsule: bool
-          - ghosts: list (one entry per non-scared ghost)
-          - scared_ghosts: list (one entry per scared ghost)
+        Channels:
+          0: walls
+          1: food value normalized (0-1, 0 if no food)
+          2: capsules
+          3: ghosts
+          4: scared ghosts
+          5: pacman position
         """
+        import numpy as _np
+        import torch as _torch
+        from util import nearestPoint
+
+        # Pacman position
         current_position = self.getPacmanPosition()
         px, py = int(round(current_position[0])), int(round(current_position[1]))
 
         walls = self.getWalls()
-        food = self.getFood()  # integer grid: 0 = empty, >0 = reward
+        food = self.getFood()  # int grid: 0 = empty, >0 = pellet reward
         capsules = set((int(x), int(y)) for x, y in self.getCapsules())
-
         width, height = walls.width, walls.height
 
-        # Map (x, y) -> list of ghost states (scared or not)
+        # Ghost map: (x,y) -> list of scared flags
         ghost_map = {}
         for ghost_state in self.getGhostStates():
             gpos = ghost_state.getPosition()
@@ -380,44 +379,37 @@ class GameState:
             gx, gy = int(gx), int(gy)
             ghost_map.setdefault((gx, gy), []).append(ghost_state.scaredTimer > 0)
 
-        grid = {}
+        n_channels = 6
+        arr = _np.zeros((n_channels, height, width), dtype=_np.float32)
+
         for x in range(width):
             for y in range(height):
-                in_bounds = True  # by definition, all (x, y) in this range are in bounds
-                cell = {
-                    'in_bounds': in_bounds,
-                    'wall': False,
-                    'food': False,
-                    'food_value': 0,
-                    'capsule': False,
-                    'ghosts': [],
-                    'scared_ghosts': [],
-                }
+                # Channel 0: walls
+                if walls[x][y]:
+                    arr[0, y, x] = 1.0
 
-                cell['wall'] = walls[x][y]
-
-                # food[x][y] is an int: 0 = empty, >0 = pellet reward
+                # Channel 1: food value normalized
                 val = food[x][y]
                 if val > 0:
-                    cell['food'] = True
-                    cell['food_value'] = int(val)
+                    norm = min(float(val), MAX_PELLET_VALUE) / MAX_PELLET_VALUE
+                    arr[1, y, x] = norm
 
-                cell['capsule'] = (x, y) in capsules
+                # Channel 2: capsules
+                if (x, y) in capsules:
+                    arr[2, y, x] = 1.0
 
+                # Channels 3 & 4: ghosts vs scared ghosts
                 for scared in ghost_map.get((x, y), []):
                     if scared:
-                        cell['scared_ghosts'].append(True)
+                        arr[4, y, x] = 1.0
                     else:
-                        cell['ghosts'].append(True)
+                        arr[3, y, x] = 1.0
 
-                grid[(x, y)] = cell
+        # Channel 5: Pacman position
+        if 0 <= px < width and 0 <= py < height:
+            arr[5, py, px] = 1.0
 
-        return {
-            'pacman_position': (px, py),
-            'grid': grid,
-            'width': width,
-            'height': height,
-        }
+        return _torch.from_numpy(arr)  # (6, H, W)
 
 
     def stepWithGhosts(self, pacman_action, ghost_agents):
