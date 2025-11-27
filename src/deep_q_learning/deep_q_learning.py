@@ -156,6 +156,9 @@ class DeepQLearningAgent(Agent):
             return
         if len(self.memory) < self.batch_size:
             return
+        if not hasattr(self, '_gpu_check_done'):
+            print(f"[DQN] optimize_policy running on device: {self.device}")
+            print(f"[DQN] policy_net on: {next(self.policy_net.parameters()).device}")
 
         mini_batch = self.memory.sample(self.batch_size)
 
