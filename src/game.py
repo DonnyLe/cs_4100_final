@@ -553,7 +553,7 @@ class GameStateData:
                         # Weighted distribution: favor extremes
                         rand = random.random()
                         if rand < 0.4:      # 40% chance for low rewards (0-5)
-                            self.food[x][y] = random.randint(0, 5)
+                            self.food[x][y] = random.randint(1, 5)
                         elif rand < 0.8:    # 40% chance for high rewards (25-30)
                             self.food[x][y] = random.randint(25, 30)
                         else:               # 20% chance for medium rewards (6-24)
@@ -604,6 +604,8 @@ class Game:
         self.agentTimeout = False
         import io
         self.agentOutput = [io.StringIO() for agent in agents]
+        # Cache last actions for each agent (optimization)
+        self.cached_actions = [None for agent in agents]
 
     def getProgress(self):
         if self.gameOver:
@@ -618,6 +620,29 @@ class Game:
         self.gameOver = True
         self.agentCrashed = True
         self.rules.agentCrash(self, agentIndex)
+
+    def _at_intersection(self, agentIndex):
+        """
+        Check if agent is at a grid intersection where it can make decisions.
+        Between grid points, agents must continue in their current direction.
+        
+        Returns True if at intersection, False if between grids.
+        """
+        if agentIndex >= len(self.state.data.agentStates):
+            return True  # Safety fallback
+        
+        agent_state = self.state.data.agentStates[agentIndex]
+        if agent_state is None or agent_state.configuration is None:
+            return True  # Safety fallback
+        
+        pos = agent_state.configuration.getPosition()
+        x, y = pos
+        x_int, y_int = int(x + 0.5), int(y + 0.5)
+        
+        TOLERANCE = 0.001
+        at_intersection = (abs(x - x_int) + abs(y - y_int) <= TOLERANCE)
+        
+        return at_intersection
 
     OLD_STDOUT = None
     OLD_STDERR = None
@@ -721,55 +746,67 @@ class Game:
 
             # Solicit an action
             action = None
-            self.mute(agentIndex)
-            if self.catchExceptions:
-                try:
-                    timed_func = TimeoutFunction(agent.getAction, int(
-                        self.rules.getMoveTimeout(agentIndex)) - int(move_time))
+            
+            # OPTIMIZATION: Only call getAction at intersections
+            at_intersection = self._at_intersection(agentIndex)
+            
+            if not at_intersection and self.cached_actions[agentIndex] is not None:
+                # Agent is between grids - use cached action (no getAction call!)
+                action = self.cached_actions[agentIndex]
+            else:
+                # Agent is at intersection - solicit new action
+                self.mute(agentIndex)
+                if self.catchExceptions:
                     try:
-                        start_time = time.time()
-                        if skip_action:
-                            raise TimeoutFunctionException()
-                        action = timed_func(observation)
-                    except TimeoutFunctionException:
-                        print("Agent %d timed out on a single move!" %
-                              agentIndex, file=sys.stderr)
-                        self.agentTimeout = True
-                        self._agentCrash(agentIndex, quiet=True)
-                        self.unmute()
-                        return
-
-                    move_time += time.time() - start_time
-
-                    if move_time > self.rules.getMoveWarningTime(agentIndex):
-                        self.totalAgentTimeWarnings[agentIndex] += 1
-                        print("Agent %d took too long to make a move! This is warning %d" % (
-                            agentIndex, self.totalAgentTimeWarnings[agentIndex]), file=sys.stderr)
-                        if self.totalAgentTimeWarnings[agentIndex] > self.rules.getMaxTimeWarnings(agentIndex):
-                            print("Agent %d exceeded the maximum number of warnings: %d" % (
-                                agentIndex, self.totalAgentTimeWarnings[agentIndex]), file=sys.stderr)
+                        timed_func = TimeoutFunction(agent.getAction, int(
+                            self.rules.getMoveTimeout(agentIndex)) - int(move_time))
+                        try:
+                            start_time = time.time()
+                            if skip_action:
+                                raise TimeoutFunctionException()
+                            action = timed_func(observation)
+                        except TimeoutFunctionException:
+                            print("Agent %d timed out on a single move!" %
+                                  agentIndex, file=sys.stderr)
                             self.agentTimeout = True
                             self._agentCrash(agentIndex, quiet=True)
                             self.unmute()
                             return
 
-                    self.totalAgentTimes[agentIndex] += move_time
-                    # print "Agent: %d, time: %f, total: %f" % (agentIndex, move_time, self.totalAgentTimes[agentIndex])
-                    if self.totalAgentTimes[agentIndex] > self.rules.getMaxTotalTime(agentIndex):
-                        print("Agent %d ran out of time! (time: %1.2f)" % (
-                            agentIndex, self.totalAgentTimes[agentIndex]), file=sys.stderr)
-                        self.agentTimeout = True
-                        self._agentCrash(agentIndex, quiet=True)
+                        move_time += time.time() - start_time
+
+                        if move_time > self.rules.getMoveWarningTime(agentIndex):
+                            self.totalAgentTimeWarnings[agentIndex] += 1
+                            print("Agent %d took too long to make a move! This is warning %d" % (
+                                agentIndex, self.totalAgentTimeWarnings[agentIndex]), file=sys.stderr)
+                            if self.totalAgentTimeWarnings[agentIndex] > self.rules.getMaxTimeWarnings(agentIndex):
+                                print("Agent %d exceeded the maximum number of warnings: %d" % (
+                                    agentIndex, self.totalAgentTimeWarnings[agentIndex]), file=sys.stderr)
+                                self.agentTimeout = True
+                                self._agentCrash(agentIndex, quiet=True)
+                                self.unmute()
+                                return
+
+                        self.totalAgentTimes[agentIndex] += move_time
+                        # print "Agent: %d, time: %f, total: %f" % (agentIndex, move_time, self.totalAgentTimes[agentIndex])
+                        if self.totalAgentTimes[agentIndex] > self.rules.getMaxTotalTime(agentIndex):
+                            print("Agent %d ran out of time! (time: %1.2f)" % (
+                                agentIndex, self.totalAgentTimes[agentIndex]), file=sys.stderr)
+                            self.agentTimeout = True
+                            self._agentCrash(agentIndex, quiet=True)
+                            self.unmute()
+                            return
+                        self.unmute()
+                    except Exception as data:
+                        self._agentCrash(agentIndex)
                         self.unmute()
                         return
-                    self.unmute()
-                except Exception as data:
-                    self._agentCrash(agentIndex)
-                    self.unmute()
-                    return
-            else:
-                action = agent.getAction(observation)
-            self.unmute()
+                else:
+                    action = agent.getAction(observation)
+                self.unmute()
+                
+                # Cache this action for between-grid steps
+                self.cached_actions[agentIndex] = action
 
             # Execute the action
             self.moveHistory.append((agentIndex, action))
