@@ -61,7 +61,7 @@ class LocalQAgent(Agent):
     CELL_FOOD = 2
     CELL_CAPSULE = 3
     CELL_GHOST = 4
-    CELL_SCARED_GHOST = 5
+    CELL__GHOST = 5
     CELL_PACMAN = 6
 
     def __init__(self,
@@ -580,28 +580,28 @@ class MinimaxAgent(MultiAgentSearchAgent):
 
         score = gameState.getScore()
         pacman = gameState.getPacmanPosition()
-        ghosts = gameState.getGhostPositions()
+        ghosts = gameState.getGhostStates()
+        ghostPositions = gameState.getGhostPositions()
         food = gameState.getFood().asList()
         capsules = gameState.getCapsules()
 
         # penalize getting closer to ghosts
-        for g in ghosts:
-            gPos = g.getPosition()
-            gDistance = util.manhattanDistance(pacman, gPos)
+        for i, ghost in enumerate(ghosts):
+            gPosition = ghostPositions[i]
+            gDistance = util.manhattanDistance(pacman, gPosition)
+            if ghost.scaredTimer > 0:
+                # if ghost is scared, Pacman should be rewarded for getting closer to it
+                if gDistance > 0:
+                    score += 200.0 / gDistance
 
-        if g.scaredTimer > 0:
-            # if ghost is scared, Pacman should be rewarded for getting closer to it
-            if gDistance > 0:
-                score += 200.0 / gDistance
-
-        else :
-            # varying levels of penalties depending on proximity
-            if gDistance <= 1:
-                score -= 500
-            elif gDistance <= 2:
-                score -= 50
-            else:
-                score -= 1.0 / gDistance
+            else :
+                # varying levels of penalties depending on proximity
+                if gDistance <= 1:
+                    score -= 500
+                elif gDistance <= 2:
+                    score -= 50
+                else:
+                    score -= 1.0 / gDistance
             
         # reward for getting closer to food
         if food:
@@ -617,6 +617,8 @@ class MinimaxAgent(MultiAgentSearchAgent):
         # - came from initial observations of Pacman getting stuck at walls/doing back-and-forth motions
         score -= len(food) * 0.1  # pressures Pacman to finish the level
         score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
+
+        return float(score)
     
     def _minimax_decision(self, gameState, depth=2):
         """
@@ -629,7 +631,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
 
         for action in legal:
             successor = gameState.generateSuccessor(0, action)
-            value = self.minimax(successor, depth, agentIndex=1)
+            value = self._minimax(successor, depth, agentIndex=1)
 
             if value > bestValue:
                 bestValue = value
@@ -655,7 +657,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
             for action in state.getLegalActions(0):
                 succ = state.generateSuccessor(0, action)
                 value = max(value,
-                            self.minimax(succ, depth, agentIndex=1))
+                            self._minimax(succ, depth, agentIndex=1))
 
             return value
 
@@ -675,7 +677,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
                 succ = state.generateSuccessor(agentIndex, action)
 
                 value = min(value,
-                            self.minimax(succ, nextDepth, nextAgent))
+                            self._minimax(succ, nextDepth, nextAgent))
 
             return value
 
@@ -691,7 +693,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
 
         self.lastPos = gameState.getPacmanPosition()
         
-        return self.minimaxDecision(gameState, depth=2)
+        return self._minimax_decision(gameState, depth=2)
     
     # Notes:
     # check Pacman speed should be 0.5 so it can't outurn the ghost?
@@ -708,31 +710,3 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
         """
         "*** YOUR CODE HERE ***"
         util.raiseNotDefined()
-
-class ExpectimaxAgent(MultiAgentSearchAgent):
-    """
-      Your expectimax agent (question 4)
-    """
-
-    def getAction(self, gameState):
-        """
-        Returns the expectimax action using self.depth and self.evaluationFunction
-
-        All ghosts should be modeled as choosing uniformly at random from their
-        legal moves.
-        """
-        "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
-
-def betterEvaluationFunction(currentGameState):
-    """
-    Your extreme ghost-hunting, pellet-nabbing, food-gobbling, unstoppable
-    evaluation function (question 5).
-
-    DESCRIPTION: <write something here so we know what you did>
-    """
-    "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
-
-# Abbreviation
-better = betterEvaluationFunction
