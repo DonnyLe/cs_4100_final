@@ -119,6 +119,9 @@ class GameState:
 
         # Time passes
         if agentIndex == 0:
+            # Here is where the time penalty is applied.  Let's get rid of this,
+            # or maybe parameterize it?  Because there's no way this is helpful
+            # for our q-learning agent.
             state.data.scoreChange += -TIME_PENALTY  # Penalty for waiting around
             # Increment step counter when pacman moves (one step per turn)
             state.data.steps += 1
@@ -265,6 +268,97 @@ class GameState:
         """
         self.data.initialize(layout, numGhostAgents, randomRewards=randomRewards, maxSteps=maxSteps)
 
+    def getLegalActionsIndices(self, action_list):
+        '''
+        Returns list of indices from action_list that are legal for Pacman in the current state.
+        Defaults to returning STOP if no other actions are currently allowed.
+        '''
+        legal_directions = self.getLegalPacmanActions()
+        if Directions.STOP in legal_directions and len(legal_directions) > 1:
+            legal_directions = [d for d in legal_directions if d != Directions.STOP]
+        
+        indices = []
+        for index, direction in enumerate(action_list):
+            if direction in legal_directions:
+                indices.append(index)
+        return indices if indices else [action_list.index(Directions.STOP)]
+
+    def buildObservation(self, window_size=2):
+        '''
+        Just like programming assignment 2, our agents that are created using reinforcement learning will need
+        to learn optimal actions based on specific states.  However, due to the enormous amount of possible states
+        on a Pacman board, we need to dumb it down to make the environment partially observable.  This window will
+        default to a 5x5 environment surrounding Pacman, but can be modified to experiment with different
+        algorithms.
+        '''
+        current_position = self.getPacmanPosition()
+        # Pacman x & y coordinates
+        px, py = int(round(current_position[0])), int(round(current_position[1]))
+        walls = self.getWalls()
+        food = self.getFood()
+        capsules = set((int(x), int(y)) for x, y in self.getCapsules())
+        
+        ghost_map = {}
+        for ghost_state in self.getGhostStates():
+            gpos = ghost_state.getPosition()
+            if gpos is None:
+                continue
+            gx, gy = nearestPoint(gpos)
+            gx, gy = int(gx), int(gy)
+            ghost_map.setdefault((gx, gy), []).append(ghost_state.scaredTimer > 0)
+        
+        window = {}
+        for dx in range(-window_size, window_size + 1):
+            for dy in range(-window_size, window_size + 1):
+                x, y = px + dx, py + dy
+                in_bounds = 0 <= x < walls.width and 0 <= y < walls.height
+                cell = {
+                    'in_bounds': in_bounds,
+                    'wall': False,
+                    'food': False,
+                    'capsule': False,
+                    'ghosts': [],
+                    'scared_ghosts': [],
+                }
+                if in_bounds:
+                    cell['wall'] = walls[x][y]
+                    cell['food'] = bool(food[x][y])
+                    cell['capsule'] = (x, y) in capsules
+                    for scared in ghost_map.get((x, y), []):
+                        if scared:
+                            cell['scared_ghosts'].append(True)
+                        else:
+                            cell['ghosts'].append(True)
+                window[(dx, dy)] = cell
+        
+        return {
+            'pacman_position': (px, py),
+            'window': window,
+            'at_food': bool(food[px][py]),
+            'at_capsule': (px, py) in capsules,
+            'ghost_in_cell': bool(ghost_map.get((px, py))),
+            'scared_ghost_in_cell': any(ghost_map.get((px, py), [])),
+            'window_size': window_size,
+        }
+
+    def stepWithGhosts(self, pacman_action, ghost_agents):
+        '''
+        Applies a given action to the game environment, then triggers all ghost actions.
+        '''
+        # Apply Pacman action
+        state = self.generateSuccessor(0, pacman_action)
+        
+        # Make sure the game isn't in a terminal state, if not move ghosts
+        if not state.isWin() and not state.isLose():
+            for idx, ghost in enumerate(ghost_agents, start=1):
+                if state.isWin() or state.isLose():
+                    break
+                ghost_action = ghost.getAction(state)
+                state = state.generateSuccessor(idx, ghost_action)
+        
+        return state
+
+
 ############################################################################
 #                     THE HIDDEN SECRETS OF PACMAN                         #
 #                                                                          #
@@ -275,6 +369,7 @@ class GameState:
 SCARED_TIME = 40    # Moves ghosts are scared
 COLLISION_TOLERANCE = 0.7  # How close ghosts must be to Pacman to kill
 TIME_PENALTY = 1  # Number of points lost each round
+# TIME_PENALTY = 0
 
 
 class ClassicGameRules:
@@ -355,7 +450,7 @@ class PacmanRules:
     These functions govern how pacman interacts with his environment under
     the classic game rules.
     """
-    PACMAN_SPEED = 1
+    PACMAN_SPEED = 0.5
 
     def getLegalActions(state):
         """
