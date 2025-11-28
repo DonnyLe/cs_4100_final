@@ -52,7 +52,7 @@ class DeepQLearningAgent(Agent):
     min_epsilon = 0.05
     epsilon_decay = 0.999
 
-    def __init__(self, qfile=None, load_model=False, device=None):
+    def __init__(self, qfile=None, load_model=False, device=None, debug_rewards = False):
         super().__init__()
 
         self.qfile = qfile
@@ -85,7 +85,12 @@ class DeepQLearningAgent(Agent):
 
         self.loss_fn = nn.MSELoss()
         self._pending_load = load_model
-        def _closest_food_distance(self, state):
+
+            # --- NEW: reward debug toggle + counter ---
+        self.debug_rewards = False
+        self.debug_step_count = 0
+
+    def _closest_food_distance(self, state):
         """Return Manhattan distance from Pacman to nearest food, or None if no food."""
         food = state.getFood()
         px, py = state.getPacmanPosition()
@@ -175,7 +180,9 @@ class DeepQLearningAgent(Agent):
 
         self.last_state_tensor = None
         self.last_action_idx = None
+        self.prev_action_idx = None
         self.last_score = state.getScore()
+        self.last_food_dist = None
         self.episode_reward = 0.0
 
     def store_transition(self, s, a, s_next, r, done):
@@ -264,26 +271,41 @@ class DeepQLearningAgent(Agent):
             current_score = state.getScore()
             game_reward = current_score - self.last_score
 
+            # Track components for debug
+            base_reward = game_reward
+            time_penalty_applied = False
+            positive_scale_applied = False
+            food_shaping_delta = 0.0
+            backtrack_delta = 0.0
+
             # Base shaping from score difference
             shaped_reward = game_reward
 
-            # Extra penalty for pure time steps (only TIME_PENALTY)
-            if game_reward == -1:  # Only TIME_PENALTY
-                shaped_reward = -2
-            # Bonus for eating something / good events
-            elif game_reward > 0:  # Ate something / win / ghost
-                shaped_reward = game_reward * 1.5
+            if game_reward > 0:
+                shaped_reward = game_reward * 1.5  
 
-            # Distance-to-food shaping
             if self.last_food_dist is not None and curr_food_dist is not None:
                 if curr_food_dist < self.last_food_dist:
                     shaped_reward += self.food_shaping_scale
                 elif curr_food_dist > self.last_food_dist:
                     shaped_reward -= self.food_shaping_scale
 
-            # Backtrack penalty (immediate reversals)
+            # Backtrack penalty
             if self._is_reverse(self.last_action_idx, self.prev_action_idx):
                 shaped_reward -= self.backtrack_penalty
+
+            # --- DEBUG PRINTS ---
+            if self.debug_rewards and self.debug_step_count < 2000:
+                print(
+                    "[DQN][reward] "
+                    f"Δscore={base_reward:.1f} | "
+                    f"time_penalty={time_penalty_applied} | "
+                    f"scaled_positive={positive_scale_applied} | "
+                    f"food_delta={food_shaping_delta:+.2f} | "
+                    f"backtrack_delta={backtrack_delta:+.2f} | "
+                    f"final_shaped={shaped_reward:+.2f}"
+                )
+                self.debug_step_count += 1
 
             self.last_score = current_score
             self.episode_reward += shaped_reward
