@@ -11,17 +11,20 @@
 # Student side autograding was added by Brad Miller, Nick Hay, and
 # Pieter Abbeel (pabbeel@cs.berkeley.edu).
 
-
+import sys
 from util import manhattanDistance, nearestPoint
-from game import Directions
+from game import Directions, Agent
 import random, util
 import numpy as np
-import math
 from util import Stack
 import os
 import pickle
-
-from game import Agent
+import time
+import pacman as pac
+import layout as pac_layout
+import ghostAgents
+from q_learning import runGamesQuiet
+from textDisplay import NullGraphics
 
 class Node:
 
@@ -566,10 +569,16 @@ class MinimaxAgent(MultiAgentSearchAgent):
     goes first and the game continues in an alternating fashion until a terminal state is achieved (Pacman
     wins or loses the game).
     """
-    def utility(self, gameState):
+    def basicUtility(self, gameState):
         """
-        Initial utility function for minimax: adds rewards for eating pellets, penalizes danger (ghosts),
-        reward being close to food.
+        Basic utility function that just returns the game score.
+        """
+        return gameState.getScore()
+    
+    def improvedUtility(self, gameState):
+        """
+        Improved utility function for minimax: adds rewards for capturing pellets, penalizes danger (ghosts),
+        rewards being close to and eating food.
         """
 
         # terminal states - game is already won/lost
@@ -584,15 +593,15 @@ class MinimaxAgent(MultiAgentSearchAgent):
         ghostPositions = gameState.getGhostPositions()
         food = gameState.getFood().asList()
         capsules = gameState.getCapsules()
+        epsilon = 1e-6
 
         # penalize getting closer to ghosts
         for i, ghost in enumerate(ghosts):
             gPosition = ghostPositions[i]
             gDistance = util.manhattanDistance(pacman, gPosition)
-            if ghost.scaredTimer > 0:
+            if ghost.scaredTimer > 0 and gDistance > 0:
                 # if ghost is scared, Pacman should be rewarded for getting closer to it
-                if gDistance > 0:
-                    score += 200.0 / gDistance
+                score += 300.0 / gDistance
 
             else :
                 # varying levels of penalties depending on proximity
@@ -606,28 +615,41 @@ class MinimaxAgent(MultiAgentSearchAgent):
         # reward for getting closer to food
         if food:
             closestFoodDist = min(util.manhattanDistance(pacman, f) for f in food)
-            score += 40.0 / (closestFoodDist + 1e-6)
+            score += 10.0 / (closestFoodDist + epsilon)
+            score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
+            # prioritizes moving closer to a large amount of food so that Pacman doesn't get stuck on one side of the map with one pellet
+            avgFoodDist = sum(util.manhattanDistance(pacman, f) for f in food) / len(food)
+            score += 5.0 / (avgFoodDist + epsilon)
+            if pacman in food:
+                score += 500
 
         # reward for getting closer to pellets
         if capsules:
             closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
-            score += 20.0 / (closestCap + 1e-6)
+            score += 20.0 / (closestCap + epsilon)
+            # prioritize if ghosts are close
+            for gPos, gState in zip(ghostPositions, ghosts):
+                gDistance = util.manhattanDistance(pacman, gPos)
+                if gState.scaredTimer == 0 and gDistance <= 3:
+                    score += 30.0 / (closestCap + epsilon)
 
         # penalize stalling / oscillation
         # - came from initial observations of Pacman getting stuck at walls/doing back-and-forth motions
-        score -= len(food) * 0.1  # pressures Pacman to finish the level
-        score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
+        score += 500 / (len(food) + epsilon)
 
         return float(score)
     
     def _minimax_decision(self, gameState, depth=2):
         """
-        Returns the best action for Pacman (agentIndex=0) using minimax.
+        Returns the best action for Pacman (agentIndex=0) using the minimax algorithm.
         """
 
         legal = [a for a in gameState.getLegalActions(0) if a != Directions.STOP]
-        bestAction = None
+        bestAction = legal[0]
         bestValue = -float("inf")
+
+        if not legal:
+            return Directions.STOP
 
         for action in legal:
             successor = gameState.generateSuccessor(0, action)
@@ -646,25 +668,27 @@ class MinimaxAgent(MultiAgentSearchAgent):
 
         # terminal state - just return the utility (objective function) value
         if depth == 0 or state.isWin() or state.isLose():
-            return self.utility(state)
+            return self.improvedUtility(state)
 
         numAgents = state.getNumAgents()
 
+        legal = state.getLegalActions(agentIndex)
+        if not legal:
+            return self.improvedUtility(state)
+
         # maximizing player - Pacman (agentIndex = 0)
         if agentIndex == 0:
-            value = -float("inf")
+            maxValue = -float("inf")
 
             for action in state.getLegalActions(0):
                 succ = state.generateSuccessor(0, action)
-                value = max(value,
-                            self._minimax(succ, depth, agentIndex=1))
-
-            return value
+                maxValue = max(maxValue, self._minimax(succ, depth, agentIndex=1))
+            
+            return maxValue
 
         # minimizing player - Ghost (agentIndex >= 1)
         else:
-            value = float("inf")
-
+            minValue = float("inf")
             nextAgent = agentIndex + 1
             nextDepth = depth
 
@@ -672,15 +696,12 @@ class MinimaxAgent(MultiAgentSearchAgent):
             if nextAgent == numAgents:
                 nextAgent = 0
                 nextDepth -= 1
-
             for action in state.getLegalActions(agentIndex):
                 succ = state.generateSuccessor(agentIndex, action)
+                minValue = min(minValue, self._minimax(succ, nextDepth, nextAgent))
 
-                value = min(value,
-                            self._minimax(succ, nextDepth, nextAgent))
-
-            return value
-
+            return minValue
+        
     def getAction(self, gameState):
         """
         Returns the minimax action from the current gameState using self.depth
@@ -692,7 +713,6 @@ class MinimaxAgent(MultiAgentSearchAgent):
             self.stuckCounter = 0
 
         self.lastPos = gameState.getPacmanPosition()
-        
         return self._minimax_decision(gameState, depth=2)
     
     # Notes:
@@ -710,3 +730,85 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
         """
         "*** YOUR CODE HERE ***"
         util.raiseNotDefined()
+
+def parse_args():
+    """
+    Helper to read arguments for evaluating the Minimax and AlphaBeta agents with a specified depth.
+    """
+    # default params
+    agent_type = "Minimax"
+    depth = 2
+
+    args = sys.argv[1:]
+    for i in range(len(args)):
+        if args[i] == "--agent" and i + 1 < len(args):
+            agent_type = args[i+1]
+        elif args[i] == "--depth" and i + 1 < len(args):
+            depth = int(args[i+1])
+
+    return agent_type, depth
+
+if __name__ == "__main__":
+    agent_type, depth = parse_args()
+
+    print(f"Evaluation using - Agent: {agent_type}, Depth: {depth}")
+
+    if agent_type == "Minimax":
+        agent = MinimaxAgent(depth=depth)
+    elif agent_type == "AlphaBeta":
+        agent = AlphaBetaAgent(depth=depth)
+    else:
+        raise ValueError(f"Unknown agent type '{agent_type}'")
+    
+    # eval params
+    num_eval_games = 25000
+    layout_name = 'mediumClassic'
+    num_ghosts = 2
+    ghost_type = 'RandomGhost'
+    frame_time = 0
+
+    layout = pac_layout.getLayout(layout_name)
+    ghost_cls = getattr(ghostAgents, ghost_type)
+    ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
+    display = NullGraphics()
+
+    # since minimax has no training, we will run several iterations of eval games
+    print(f"Running {num_eval_games} evaluation games\n")
+
+    time_start = time.perf_counter()
+    games = runGamesQuiet(
+        layout=layout,
+        pacman=agent,
+        ghosts=ghosts,
+        display=display,
+        numGames=num_eval_games,
+        record=False,
+        numTraining=0,
+        catchExceptions=False,
+        timeout=30,
+        randomRewards=False,
+        max_steps=1000
+    )
+    time_end = time.perf_counter()
+
+    # collect stats
+    scores = [g.state.getScore() for g in games]
+    wins = [g.state.isWin() for g in games]
+    try:
+        lengths = [len(g.moveHistory) for g in games]
+    except:
+        lengths = []
+    avg_score = np.mean(scores)
+    win_rate = sum(wins) / num_eval_games
+    avg_length = np.mean(lengths) if lengths else 0
+    total_time = time_end - time_start
+    time_per_game = total_time / num_eval_games
+
+    # print stats (similar to PA2)
+    print(f"{agent} Agent Evaluation Stats")
+    print(f"Games played: {num_eval_games}")
+    print(f"Average score: {avg_score:.2f}")
+    print(f"Win rate: {win_rate:.2%}")
+    print(f"Average game length: {avg_length:.1f} moves")
+    print(f"Total runtime: {total_time:.2f} sec")
+    print(f"Time per game: {time_per_game:.2f} sec")
