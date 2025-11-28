@@ -43,9 +43,13 @@ class DeepQLearningAgent(Agent):
     target_sync_steps = 1000
     
     # Reward shaping
-    backtrack_penalty = 4.0          # extra penalty for immediate reverse
-    food_shaping_scale = 0.5         # +/- reward for moving closer/farther to food
+    backtrack_penalty = 3          # extra penalty for immediate reverse
+    food_shaping_scale = 3         # +/- reward for moving closer/farther to food
 
+    # Ghost distance shaping
+    ghost_safe_scale = 0.5       # reward for moving farther from a dangerous ghost
+    ghost_danger_scale = 0.7     # penalty for moving closer to a dangerous ghost
+    ghost_safety_radius = 5      # only shape when within this many tiles
 
     # Exploration
     initial_epsilon = 1.0
@@ -86,7 +90,9 @@ class DeepQLearningAgent(Agent):
         self.loss_fn = nn.MSELoss()
         self._pending_load = load_model
 
-            # --- NEW: reward debug toggle + counter ---
+        self.last_food_dist = None
+        self.last_ghost_dist = None   # NEW
+
         self.debug_rewards = False
         self.debug_step_count = 0
 
@@ -183,11 +189,13 @@ class DeepQLearningAgent(Agent):
         self.prev_action_idx = None
         self.last_score = state.getScore()
         self.last_food_dist = None
+        self.last_ghost_dist = None  
         self.episode_reward = 0.0
 
     def store_transition(self, s, a, s_next, r, done):
         """Store one transition in replay memory."""
         self.memory.append((s, a, s_next, r, done))
+        # print("MEMORY: ", self.memory.memory)
 
     def optimize_policy(self):
         """Sample a mini-batch and perform one gradient step."""
@@ -247,12 +255,14 @@ class DeepQLearningAgent(Agent):
             self.target_net.load_state_dict(self.policy_net.state_dict())
 
     def getAction(self, state):
+        print("ENTEREDDD")
         """
         Select and return an action.
         
         We:
           - build a (9, H, W) tensor directly from GameState
-          - apply reward shaping based on score diff, distance to food, and backtracking
+          - apply reward shaping based on score diff, distance to food, backtracking,
+            and distance to dangerous ghosts
           - store transitions in replay
           - optimize the policy_net
           - choose epsilon-greedy action
@@ -263,8 +273,9 @@ class DeepQLearningAgent(Agent):
         # Build observation tensor directly from GameState
         state_tensor = build_full_observation_tensor(state).float()
 
-        # Compute current distance to nearest food (for shaping)
+        # Current distances used for shaping
         curr_food_dist = self._closest_food_distance(state)
+        curr_ghost_dist = self._closest_ghost_distance(state)
 
         # --- Learning from the previous transition ---
         if self.training and self.last_state_tensor is not None and self.last_action_idx is not None:
@@ -273,36 +284,65 @@ class DeepQLearningAgent(Agent):
 
             # Track components for debug
             base_reward = game_reward
-            time_penalty_applied = False
             positive_scale_applied = False
             food_shaping_delta = 0.0
             backtrack_delta = 0.0
+            ghost_shaping_delta = 0.0
 
-            # Base shaping from score difference
+            # Base: environment reward
             shaped_reward = game_reward
-
+            
+            # Scale positive rewards (e.g., eating pellets, ghosts, win bonus)
             if game_reward > 0:
-                shaped_reward = game_reward * 1.5  
+                shaped_reward = game_reward * 3
+                positive_scale_applied = True
 
+            # --- Distance-to-food shaping ---
             if self.last_food_dist is not None and curr_food_dist is not None:
                 if curr_food_dist < self.last_food_dist:
-                    shaped_reward += self.food_shaping_scale
+                    food_shaping_delta = self.food_shaping_scale
+                    shaped_reward += food_shaping_delta
                 elif curr_food_dist > self.last_food_dist:
-                    shaped_reward -= self.food_shaping_scale
+                    food_shaping_delta = -self.food_shaping_scale
+                    shaped_reward += food_shaping_delta
 
-            # Backtrack penalty
-            if self._is_reverse(self.last_action_idx, self.prev_action_idx):
-                shaped_reward -= self.backtrack_penalty
+            # --- Backtrack penalty ---
+            apply_backtrack = True
+            if curr_ghost_dist is not None and curr_ghost_dist <= self.ghost_safety_radius:
+                # Don't punish reversal when a dangerous ghost is close – might be escaping
+                apply_backtrack = False
+
+            if apply_backtrack and self._is_reverse(self.last_action_idx, self.prev_action_idx):
+                backtrack_delta = -self.backtrack_penalty
+                shaped_reward += backtrack_delta
+            else:
+                backtrack_delta = 0.0
+            # --- Ghost-distance shaping (dangerous ghosts only) ---
+            # Use change in distance to the nearest dangerous ghost,
+            # but only when within a safety radius.
+            if self.last_ghost_dist is not None and curr_ghost_dist is not None:
+                # Check if we are / were in the "danger zone"
+                if (self.last_ghost_dist <= self.ghost_safety_radius or
+                    curr_ghost_dist <= self.ghost_safety_radius):
+                    
+                    if curr_ghost_dist > self.last_ghost_dist:
+                        # Moved farther away from dangerous ghost => good
+                        ghost_shaping_delta = self.ghost_safe_scale
+                        shaped_reward += ghost_shaping_delta
+                    elif curr_ghost_dist < self.last_ghost_dist:
+                        # Moved closer to dangerous ghost => bad
+                        ghost_shaping_delta = -self.ghost_danger_scale
+                        shaped_reward += ghost_shaping_delta
 
             # --- DEBUG PRINTS ---
             if self.debug_rewards and self.debug_step_count < 2000:
                 print(
                     "[DQN][reward] "
-                    f"Δscore={base_reward:.1f} | "
-                    f"time_penalty={time_penalty_applied} | "
-                    f"scaled_positive={positive_scale_applied} | "
+                    f"Δscore={base_reward:+.1f} | "
+                    f"scaled_pos={positive_scale_applied} | "
                     f"food_delta={food_shaping_delta:+.2f} | "
                     f"backtrack_delta={backtrack_delta:+.2f} | "
+                    f"ghost_delta={ghost_shaping_delta:+.2f} | "
                     f"final_shaped={shaped_reward:+.2f}"
                 )
                 self.debug_step_count += 1
@@ -344,9 +384,33 @@ class DeepQLearningAgent(Agent):
         self.last_state_tensor = state_tensor
         self.last_action_idx = action_idx
         self.last_food_dist = curr_food_dist
+        self.last_ghost_dist = curr_ghost_dist   # NEW: track ghost distance history
 
         direction = ACTION_LIST[action_idx]
         return direction
+
+
+    
+    def _closest_ghost_distance(self, state):
+        # non-scared ghosts only
+        ghost_positions = []
+        for ghost_state in state.getGhostStates():
+            if ghost_state.scaredTimer > 0:
+                continue
+            pos = ghost_state.getPosition()
+            if pos is None:
+                continue
+            gx, gy = int(round(pos[0])), int(round(pos[1]))
+            ghost_positions.append((gx, gy))
+
+        if not ghost_positions:
+            return None
+
+        px, py = state.getPacmanPosition()
+        px, py = int(round(px)), int(round(py))
+
+        return min(abs(gx - px) + abs(gy - py) for gx, gy in ghost_positions)
+
 
 
     def final(self, state):
@@ -356,9 +420,6 @@ class DeepQLearningAgent(Agent):
             current_score = state.getScore()
             reward = current_score - self.last_score
             
-            # Reward shaping
-            if reward == -1:
-                reward = -2
             
             self.episode_reward += reward
 
