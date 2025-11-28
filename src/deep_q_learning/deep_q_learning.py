@@ -1,5 +1,5 @@
 import os
-from deep_q_learning.cnn import PacmanCNN, encode_full_observation_cnn
+from deep_q_learning.cnn import PacmanCNN
 from game import Agent, Directions
 from training_utils import get_output_path
 import torch
