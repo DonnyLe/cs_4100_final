@@ -1,5 +1,5 @@
 import os
-from deep_q_learning.cnn import PacmanCNN
+from deep_q_learning.cnn import PacmanCNN, build_full_observation_tensor
 from game import Agent, Directions
 from training_utils import get_output_path
 import torch
@@ -41,6 +41,11 @@ class DeepQLearningAgent(Agent):
     replay_memory_size = 50000
     batch_size = 64
     target_sync_steps = 1000
+    
+    # Reward shaping
+    backtrack_penalty = 4.0          # extra penalty for immediate reverse
+    food_shaping_scale = 0.5         # +/- reward for moving closer/farther to food
+
 
     # Exploration
     initial_epsilon = 1.0
@@ -80,6 +85,35 @@ class DeepQLearningAgent(Agent):
 
         self.loss_fn = nn.MSELoss()
         self._pending_load = load_model
+        def _closest_food_distance(self, state):
+        """Return Manhattan distance from Pacman to nearest food, or None if no food."""
+        food = state.getFood()
+        px, py = state.getPacmanPosition()
+        px, py = int(round(px)), int(round(py))
+        width, height = food.width, food.height
+
+        best = None
+        for x in range(width):
+            for y in range(height):
+                if food[x][y]:
+                    d = abs(x - px) + abs(y - py)
+                    if best is None or d < best:
+                        best = d
+        return best
+
+    def _is_reverse(self, curr_idx, prev_idx):
+        """Return True if action curr_idx is the exact reverse of prev_idx."""
+        if curr_idx is None or prev_idx is None:
+            return False
+        a = ACTION_LIST[curr_idx]
+        b = ACTION_LIST[prev_idx]
+        return (
+            (a == Directions.NORTH and b == Directions.SOUTH) or
+            (a == Directions.SOUTH and b == Directions.NORTH) or
+            (a == Directions.EAST  and b == Directions.WEST)  or
+            (a == Directions.WEST  and b == Directions.EAST)
+        )
+
 
     def _init_networks_from_state(self, state):
         """Initialize networks based on layout size."""
@@ -89,8 +123,7 @@ class DeepQLearningAgent(Agent):
         layout = state.data.layout
         width, height = layout.width, layout.height
 
-        # Use 6 channels (standard: walls but no food values)
-        in_channels = 6
+        in_channels = 9  # 9-channel input now
         
         self.policy_net = PacmanCNN(width, height, self.n_actions, in_channels=in_channels).to(self.device)
         self.target_net = PacmanCNN(width, height, self.n_actions, in_channels=in_channels).to(self.device)
@@ -102,6 +135,7 @@ class DeepQLearningAgent(Agent):
         if self._pending_load and self.qfile:
             self._load_model()
             self._pending_load = False
+
 
     def _save_model(self):
         if not self.qfile or self.policy_net is None:
@@ -209,37 +243,54 @@ class DeepQLearningAgent(Agent):
         """
         Select and return an action.
         
-        OPTIMIZED: Only computes CNN and learns at grid intersections.
-        Between grids, returns the forced continuation action immediately.
+        We:
+          - build a (9, H, W) tensor directly from GameState
+          - apply reward shaping based on score diff, distance to food, and backtracking
+          - store transitions in replay
+          - optimize the policy_net
+          - choose epsilon-greedy action
         """
         if self.policy_net is None:
             self._init_networks_from_state(state)
 
-        
-        state_tensor = state.buildFullObservationTensor().float().to(self.device)
+        # Build observation tensor directly from GameState
+        state_tensor = build_full_observation_tensor(state).float()
 
+        # Compute current distance to nearest food (for shaping)
+        curr_food_dist = self._closest_food_distance(state)
+
+        # --- Learning from the previous transition ---
         if self.training and self.last_state_tensor is not None and self.last_action_idx is not None:
             current_score = state.getScore()
             game_reward = current_score - self.last_score
-        
-            # Shaped reward for learning
+
+            # Base shaping from score difference
             shaped_reward = game_reward
-            
-            # Penalty for wasting time (no progress)
+
+            # Extra penalty for pure time steps (only TIME_PENALTY)
             if game_reward == -1:  # Only TIME_PENALTY
                 shaped_reward = -2
-            
-            # Bonus for eating food
-            elif game_reward > 0:  # Ate something!
-                shaped_reward = game_reward * 1.5  # Amplify positive rewards
-            
+            # Bonus for eating something / good events
+            elif game_reward > 0:  # Ate something / win / ghost
+                shaped_reward = game_reward * 1.5
+
+            # Distance-to-food shaping
+            if self.last_food_dist is not None and curr_food_dist is not None:
+                if curr_food_dist < self.last_food_dist:
+                    shaped_reward += self.food_shaping_scale
+                elif curr_food_dist > self.last_food_dist:
+                    shaped_reward -= self.food_shaping_scale
+
+            # Backtrack penalty (immediate reversals)
+            if self._is_reverse(self.last_action_idx, self.prev_action_idx):
+                shaped_reward -= self.backtrack_penalty
+
             self.last_score = current_score
-        
             self.episode_reward += shaped_reward
 
             done = state.isWin() or state.isLose()
             next_tensor = None if done else state_tensor
-            
+
             self.store_transition(
                 self.last_state_tensor,
                 self.last_action_idx,
@@ -248,8 +299,8 @@ class DeepQLearningAgent(Agent):
                 done,
             )
             self.optimize_policy()
-        
-        # Action selection (epsilon-greedy)
+
+        # --- Action selection (epsilon-greedy) ---
         legal_indices = state.getLegalActionsIndices(ACTION_LIST)
         if not legal_indices:
             legal_indices = [0]
@@ -266,12 +317,15 @@ class DeepQLearningAgent(Agent):
             best_idx = max(legal_indices, key=lambda i: q_vals[i])
             action_idx = int(best_idx)
 
-        # Store for next intersection
+        # --- Update tracking for next step ---
+        self.prev_action_idx = self.last_action_idx
         self.last_state_tensor = state_tensor
         self.last_action_idx = action_idx
+        self.last_food_dist = curr_food_dist
 
         direction = ACTION_LIST[action_idx]
         return direction
+
 
     def final(self, state):
         """Called at the end of each game."""
