@@ -8,12 +8,28 @@ import pickle
 import os
 import math
 import time
+import numpy as np
+import matplotlib.pyplot as plt
+
+# this is the output directory for the data files
+def ensure_sarsa_output_dir():
+    if not os.path.exists('sarsa_data'):
+        os.makedirs('sarsa_data')
+    return 'sarsa_data'
+
+def get_sarsa_output_path(filename):
+    ensure_sarsa_output_dir()
+    return os.path.join('sarsa_data', filename)
 
 class SARSAAgent(Agent):
     
-    def __init__(self, index = 0, epsilon = 0.1, alpha = 0.005, gamma = 0.9, numTraining = 100):
+    def __init__(self, index=0, epsilon=1.0, alpha=0.005, gamma=0.9, numTraining=100,
+                 epsilonDecay=0.9999, minEpsilon=0.05, weightsFile=None):
         self.index = index
         self.epsilon = float(epsilon)
+        self.initialEpsilon = float(epsilon)
+        self.epsilonDecay = float(epsilonDecay)
+        self.minEpsilon = float(minEpsilon)
         self.alpha = float(alpha)
         self.gamma = float(gamma)
         self.numTraining = int(numTraining)
@@ -22,23 +38,63 @@ class SARSAAgent(Agent):
         self.episodesSoFar = 0
         self.lastState = None
         self.lastAction = None
-        self.episodeRewards = 0.0
+        self.lastScore = 0.0
+        self.episodeReward = 0.0
+        self.allEpisodeRewards = []
         
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        epsilon_int = int(self.epsilon * 100)
-        alpha_int = int(self.alpha * 1000)
-        self.weightsFile = f'sarsa_e{epsilon_int}_a{alpha_int}_n{self.numTraining}_{timestamp}.pkl'
+        if weightsFile:
+            self.weightsFile = weightsFile
+        else:
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            self.weightsFile = f'sarsa_n{self.numTraining}_e{self.epsilonDecay}_{timestamp}.pkl'
         
         if self.numTraining > 0:
-            print(f"Training session: {self.weightsFile}")
+            print(f"training session: {self.weightsFile}")
         
     def saveWeights(self):
         try:
-            with open(self.weightsFile, 'wb') as f:
-                pickle.dump(self.weights, f)
-        except:
+            filepath = get_sarsa_output_path(self.weightsFile)
+            data = {
+                'weights': self.weights,
+                'episode_rewards': self.allEpisodeRewards,
+                'epsilon': self.epsilon,
+                'episodes_trained': self.episodesSoFar
+            }
+            with open(filepath, 'wb') as f:
+                pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception as e:
             if self.episodesSoFar >= self.numTraining:
-                print("failed saving weights")
+                print(f"Failed saving weights: {e}")
+    
+    def plotAverageRewards(self):
+        if len(self.allEpisodeRewards) == 0:
+            print("No episode rewards to plot.")
+            return
+        
+        rewards = np.array(self.allEpisodeRewards)
+        running_avg = np.cumsum(rewards) / np.arange(1, len(rewards) + 1)
+        
+        plt.figure(figsize=(10, 6))
+        plt.plot(running_avg, color='#0072B2', linewidth=1.5, label='Running Avg. Reward')
+        plt.xlabel('Episode', fontsize=12)
+        plt.ylabel('Running Average Reward', fontsize=12)
+        plt.title(f'SARSA: Running Average Reward ({len(rewards)} episodes)', fontsize=13, weight='bold')
+        plt.grid(alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        
+        plot_filename = f'sarsa_reward_plot_{len(rewards)}_{self.epsilonDecay}.png'
+        plt.savefig(get_sarsa_output_path(plot_filename), dpi=300)
+        plt.close()
+        print(f"Saved reward plot to: {get_sarsa_output_path(plot_filename)}")
+        
+        csv_filename = f'sarsa_episode_rewards_{len(rewards)}_{self.epsilonDecay}.csv'
+        csv_path = get_sarsa_output_path(csv_filename)
+        with open(csv_path, 'w') as f:
+            f.write('episode,reward,avg_reward\n')
+            for i, (r, avg) in enumerate(zip(rewards, running_avg)):
+                f.write(f'{i},{r},{avg}\n')
+        print(f"Saved episode rewards CSV to: {csv_path}")
     
     def getFeatures(self, state, action):
         features = util.Counter()
@@ -156,7 +212,10 @@ class SARSAAgent(Agent):
             action = self.getPolicy(state)
         
         if self.lastState is not None:
-            reward = state.getScore() - self.lastState.getScore()
+            currentScore = state.getScore()
+            reward = currentScore - self.lastScore
+            self.lastScore = currentScore
+            self.episodeReward += reward
             self.update(self.lastState, self.lastAction, reward, state, action)
         
         self.lastState = state
@@ -184,7 +243,11 @@ class SARSAAgent(Agent):
     
     def final(self, state):
         if self.lastState is not None:
-            reward = state.getScore() - self.lastState.getScore()
+            currentScore = state.getScore()
+            reward = currentScore - self.lastScore
+            self.episodeReward += reward
+            
+            # terminal state: Q(terminal) = 0
             features = self.getFeatures(self.lastState, self.lastAction)
             currentQ = sum(self.weights[f] * features[f] for f in features)
             difference = reward - currentQ
@@ -196,36 +259,58 @@ class SARSAAgent(Agent):
                 self.weights[feature] += update
                 self.weights[feature] = max(-100.0, min(100.0, self.weights[feature]))
         
+        # storing episode reward for vis
+        self.allEpisodeRewards.append(self.episodeReward)
+        
         self.episodesSoFar += 1
         
+        # decay epsilon during training
+        if self.episodesSoFar < self.numTraining:
+            self.epsilon = max(self.minEpsilon, self.epsilon * self.epsilonDecay)
+        
+        # determine result
         if state.isWin():
             result = "WIN"
-        elif state.data.steps >= state.data.maxSteps if state.data.maxSteps else False:
+        elif state.data.maxSteps and state.data.steps >= state.data.maxSteps:
             result = "TIMEOUT"
         else:
             result = "LOSS"
         
-        if self.episodesSoFar >= self.numTraining:
-            print(f"E:{self.episodesSoFar}|S:{state.getScore():.0f}|{result}")
+        # log progress every 100 episodes
+        if self.episodesSoFar <= self.numTraining and self.episodesSoFar % 100 == 0:
+            avgReward = np.mean(self.allEpisodeRewards[-100:]) if len(self.allEpisodeRewards) >= 100 else np.mean(self.allEpisodeRewards)
+            print(f"e:{self.episodesSoFar}|avgR:{avgReward:.1f}|eps:{self.epsilon:.4f}|{result}")
         
-        if self.episodesSoFar % 10 == 0 and self.episodesSoFar <= self.numTraining:
+        # print eval results after training
+        if self.episodesSoFar > self.numTraining:
+            print(f"Eval E:{self.episodesSoFar - self.numTraining}|S:{state.getScore():.0f}|{result}")
+        
+        # save periodically during training
+        if self.episodesSoFar % 500 == 0 and self.episodesSoFar <= self.numTraining:
             self.saveWeights()
-            if self.episodesSoFar == self.numTraining:
-                print(f"Training: E:{self.episodesSoFar}|S:{state.getScore():.0f}|{result}")
         
         self.lastState = None
         self.lastAction = None
-        self.episodeRewards = 0.0
+        self.episodeReward = 0.0
         
         if self.episodesSoFar == self.numTraining:
             self.saveWeights()
-            print(f"\nSaved to: {self.weightsFile}")
-            print("Final weights:")
-            for key, value in sorted(self.weights.items(), key=lambda x: abs(x[1]), reverse=True):
+            self.plotAverageRewards()
+            
+            print(f"\n{'='*50}")
+            print("Training Complete!")
+            print(f"{'='*50}")
+            print(f"saved weights to: {get_sarsa_output_path(self.weightsFile)}")
+            print(f"total episodes: {self.numTraining}")
+            print(f"final epsilon: {self.epsilon:.4f}")
+            print(f"avg reward: {np.mean(self.allEpisodeRewards[-100:]):.2f}")
+            print(f"\nLearned weights ({len(self.weights)} features):")
+            for key, value in sorted(self.weights.items(), key=lambda x: abs(x[1]), reverse=True)[:15]:
                 print(f"  {key}: {value:.4f}")
     
     def registerInitialState(self, state):
         self.lastState = None
         self.lastAction = None
-        self.episodeRewards = 0.0
+        self.lastScore = state.getScore()
+        self.episodeReward = 0.0
 
