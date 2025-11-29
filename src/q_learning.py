@@ -373,180 +373,99 @@ decay_rate = 0.99995
 # Let's include the window size because that definitely changes the Q-table.
 qfile_name = f'Q_table_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.pickle'
 # qfile_name = f'Q_table_{num_episodes}_{decay_rate}.pickle'
+if __name__ == "__main__":
 
-if train_flag:
-    # Training mode
-    print(f"Training Q-learning agent for {num_episodes} episodes...")
-    print(f"Decay rate: {decay_rate}")
-    print(f"Q-table will be saved to: {qfile_name}")
-    
-    # Create agent in training mode
-    agent = QLearningAgent(
-        window_size=ENV_WINDOW_SIZE,
-        gamma=0.9,
-        epsilon=1.0,
-        decay_rate=decay_rate,
-        min_epsilon=0.05,
-        qfile=qfile_name
-    )
-    agent.setTraining(True)
-    
-    # Use command-line args or defaults
-    layout_name = 'mediumClassic'
-    num_ghosts = 2
-    ghost_type = 'RandomGhost'
-    frame_time = 0.0 if not gui_flag else 0.001
-    
-    # Parse command line for layout/ghosts if provided
-    if len(sys.argv) > 1:
-        # Simple parsing - can be enhanced
+    else:
+        # Evaluation mode
+        filename = qfile_name
+        input(f"\n{BOLD}Currently loading Q-table from {filename}{RESET}.\n\nPress Enter to confirm, or Ctrl+C to cancel.\n")
+        
+        # Create agent in evaluation mode (loads Q-table)
+        agent = QLearningAgent(
+            window_size=ENV_WINDOW_SIZE,
+            epsilon=0.0,  # No exploration
+            qfile=filename,
+            load_qtable=True
+        )
+        agent.setTraining(False)
+        
+        print(f'Length of Q-Table: {len(agent.q_table)}')
+        
+        # Setup for evaluation
+        layout_name = 'mediumClassic'
+        num_ghosts = 2
+        ghost_type = 'RandomGhost'
+        frame_time = 0.0 if not gui_flag else 0.001
+        num_eval_games = 100
+        
+        # Parse command line if provided
         for arg in sys.argv[1:]:
             if arg.startswith('--layout='):
                 layout_name = arg.split('=')[1]
             elif arg.startswith('--ghosts='):
                 num_ghosts = int(arg.split('=')[1])
-            elif arg.startswith('--ghost-type='):
-                ghost_type = arg.split('=')[1]
-    
-    # Get layout and create ghosts
-    layout = pac_layout.getLayout(layout_name)
-    ghost_cls = getattr(ghostAgents, ghost_type)
-    ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
-    
-    # Setup display
-    if gui_flag:
-        from graphicsDisplay import PacmanGraphics
-        display = PacmanGraphics(frameTime=frame_time)
-    else:
-        from textDisplay import NullGraphics
-        display = NullGraphics()
-    
-    # Run training games
-    time_start = time.perf_counter()
-    games = runGamesQuiet(
-        layout=layout,
-        pacman=agent,
-        ghosts=ghosts,
-        display=display,
-        numGames=num_episodes,
-        record=False,
-        numTraining=num_episodes,  # All games are training
-        catchExceptions=False,
-        timeout=30,
-        randomRewards=False,
-        max_steps=MAX_STEPS
-    )
-    time_end = time.perf_counter()
-    
-    print(f'\nTraining Runtime (sec): {time_end - time_start:.2f}')
-    
-    # Save final Q-table
-    agent._save_qtable()
-    
-    # Generate reward plot
-    if len(agent.episode_rewards) > 0:
-        running_avg = np.cumsum(agent.episode_rewards) / np.arange(1, len(agent.episode_rewards) + 1)
-        reward_df = pd.DataFrame({
-            "episode": np.arange(len(agent.episode_rewards)),
-            "avg_reward": running_avg
-        })
-        reward_df.to_csv(get_output_path(f"episode_rewards_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.csv"), index=False)
-        training_rewards_plot(reward_df, num_episodes, decay_rate)
-        print(f"Average reward: {np.mean(agent.episode_rewards):.2f}")
-        print(f"Final epsilon: {agent.epsilon:.4f}")
-        print(f"Q-table size: {len(agent.q_table)} states")
-
-else:
-    # Evaluation mode
-    filename = qfile_name
-    input(f"\n{BOLD}Currently loading Q-table from {filename}{RESET}.\n\nPress Enter to confirm, or Ctrl+C to cancel.\n")
-    
-    # Create agent in evaluation mode (loads Q-table)
-    agent = QLearningAgent(
-        window_size=ENV_WINDOW_SIZE,
-        epsilon=0.0,  # No exploration
-        qfile=filename,
-        load_qtable=True
-    )
-    agent.setTraining(False)
-    
-    print(f'Length of Q-Table: {len(agent.q_table)}')
-    
-    # Setup for evaluation
-    layout_name = 'mediumClassic'
-    num_ghosts = 2
-    ghost_type = 'RandomGhost'
-    frame_time = 0.0 if not gui_flag else 0.001
-    num_eval_games = 100
-    
-    # Parse command line if provided
-    for arg in sys.argv[1:]:
-        if arg.startswith('--layout='):
-            layout_name = arg.split('=')[1]
-        elif arg.startswith('--ghosts='):
-            num_ghosts = int(arg.split('=')[1])
-        elif arg.startswith('--games='):
-            num_eval_games = int(arg.split('=')[1])
-    
-    layout = pac_layout.getLayout(layout_name)
-    ghost_cls = getattr(ghostAgents, ghost_type)
-    ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
-    
-    if gui_flag:
-        from graphicsDisplay import PacmanGraphics
-        display = PacmanGraphics(frameTime=frame_time)
-    else:
-        from textDisplay import NullGraphics
-        display = NullGraphics()
-    
-    # Track statistics
-    contexts_order = ["CAPSULE", "GHOST", "SCARED_GHOST", "FOOD", "EMPTY"]
-    action_hist_by_ctx = {c: np.zeros(len(ACTION_LIST), dtype=np.int64) for c in contexts_order}
-    newly_discovered_states = []
-    previsited_states = []
-    
-    # Run evaluation games
-    time_start = time.perf_counter()
-    games = runGamesQuiet(
-        layout=layout,
-        pacman=agent,
-        ghosts=ghosts,
-        display=display,
-        numGames=num_eval_games,
-        record=False,
-        numTraining=0,  # No training
-        catchExceptions=False,
-        timeout=30,
-        randomRewards=False,
-        max_steps=MAX_STEPS
-    )
-    time_end = time.perf_counter()
-    
-    # Collect statistics from games
-    scores = [g.state.getScore() for g in games]
-    wins = [g.state.isWin() for g in games]
-    # Try to get episode lengths from move history if available
-    try:
-        episode_lengths = [len(g.moveHistory) for g in games]
-    except AttributeError:
-        episode_lengths = []  # Not available
-    
-    total_evaluation_time = time_end - time_start
-    total_eval_time_min = int(total_evaluation_time // 60)
-    eval_time_remaining_sec = int(total_evaluation_time % 60)
-    
-    avg_reward = np.mean(scores) if scores else 0
-    avg_length = np.mean(episode_lengths) if episode_lengths else 0
-    win_rate = sum(wins) / len(wins) if wins else 0
-    
-    print()
-    print("Number of Training Episodes:", num_episodes)
-    print("Decay Rate:", decay_rate)
-    print()
-    print(f"Average Reward: {avg_reward:.2f}")
-    print(f"Win Rate: {win_rate:.2%} ({sum(wins)}/{len(wins)})")
-    print(f"Average Episode Length: {avg_length:.2f} moves")
-    print()
-    print(f"Time taken to run {num_eval_games} evaluations: {total_evaluation_time:.2f} sec")
-    print(f"Time taken (minutes): {total_eval_time_min}:{eval_time_remaining_sec:02d}")
+            elif arg.startswith('--games='):
+                num_eval_games = int(arg.split('=')[1])
+        
+        layout = pac_layout.getLayout(layout_name)
+        ghost_cls = getattr(ghostAgents, ghost_type)
+        ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
+        
+        if gui_flag:
+            from graphicsDisplay import PacmanGraphics
+            display = PacmanGraphics(frameTime=frame_time)
+        else:
+            from textDisplay import NullGraphics
+            display = NullGraphics()
+        
+        # Track statistics
+        contexts_order = ["CAPSULE", "GHOST", "SCARED_GHOST", "FOOD", "EMPTY"]
+        action_hist_by_ctx = {c: np.zeros(len(ACTION_LIST), dtype=np.int64) for c in contexts_order}
+        newly_discovered_states = []
+        previsited_states = []
+        
+        # Run evaluation games
+        time_start = time.perf_counter()
+        games = runGamesQuiet(
+            layout=layout,
+            pacman=agent,
+            ghosts=ghosts,
+            display=display,
+            numGames=num_eval_games,
+            record=False,
+            numTraining=0,  # No training
+            catchExceptions=False,
+            timeout=30,
+            randomRewards=False,
+            max_steps=MAX_STEPS
+        )
+        time_end = time.perf_counter()
+        
+        # Collect statistics from games
+        scores = [g.state.getScore() for g in games]
+        wins = [g.state.isWin() for g in games]
+        # Try to get episode lengths from move history if available
+        try:
+            episode_lengths = [len(g.moveHistory) for g in games]
+        except AttributeError:
+            episode_lengths = []  # Not available
+        
+        total_evaluation_time = time_end - time_start
+        total_eval_time_min = int(total_evaluation_time // 60)
+        eval_time_remaining_sec = int(total_evaluation_time % 60)
+        
+        avg_reward = np.mean(scores) if scores else 0
+        avg_length = np.mean(episode_lengths) if episode_lengths else 0
+        win_rate = sum(wins) / len(wins) if wins else 0
+        
+        print()
+        print("Number of Training Episodes:", num_episodes)
+        print("Decay Rate:", decay_rate)
+        print()
+        print(f"Average Reward: {avg_reward:.2f}")
+        print(f"Win Rate: {win_rate:.2%} ({sum(wins)}/{len(wins)})")
+        print(f"Average Episode Length: {avg_length:.2f} moves")
+        print()
+        print(f"Time taken to run {num_eval_games} evaluations: {total_evaluation_time:.2f} sec")
+        print(f"Time taken (minutes): {total_eval_time_min}:{eval_time_remaining_sec:02d}")
 

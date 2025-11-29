@@ -623,7 +623,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
             if pacman in food:
                 score += 500
 
-        # reward for getting closer to pellets
+        # reward for getting closer to power capsules
         if capsules:
             closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
             score += 20.0 / (closestCap + epsilon)
@@ -761,7 +761,7 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown agent type '{agent_type}'")
     
     # eval params
-    num_eval_games = 25000
+    num_eval_games = 1000
     layout_name = 'mediumClassic'
     num_ghosts = 2
     ghost_type = 'RandomGhost'
@@ -786,7 +786,7 @@ if __name__ == "__main__":
         numTraining=0,
         catchExceptions=False,
         timeout=30,
-        randomRewards=False,
+        randomRewards=True,
         max_steps=1000
     )
     time_end = time.perf_counter()
