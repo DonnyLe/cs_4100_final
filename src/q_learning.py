@@ -374,6 +374,7 @@ decay_rate = 0.99995
 qfile_name = f'Q_table_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.pickle'
 # qfile_name = f'Q_table_{num_episodes}_{decay_rate}.pickle'
 if __name__ == "__main__":
+    if train_flag:
 
     else:
         # Evaluation mode
