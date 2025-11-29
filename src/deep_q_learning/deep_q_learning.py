@@ -1,6 +1,6 @@
 import os
 from deep_q_learning.cnn import PacmanCNN, build_full_observation_tensor
-from game import Agent, Directions
+from game import Agent, Directions, Actions      # NOTE: import Actions here
 from training_utils import get_output_path
 import torch
 import torch.nn as nn
@@ -10,8 +10,12 @@ from collections import deque
 import random
 
 
-
-ACTION_LIST = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST, Directions.STOP]
+ACTION_LIST = [
+    Directions.NORTH,
+    Directions.SOUTH,
+    Directions.EAST,
+    Directions.WEST,
+]
 
 
 class ReplayMemory:
@@ -42,21 +46,20 @@ class DeepQLearningAgent(Agent):
     batch_size = 64
     target_sync_steps = 1000
     
-    # Reward shaping
-    backtrack_penalty = 3          # extra penalty for immediate reverse
-    food_shaping_scale = 3         # +/- reward for moving closer/farther to food
-
-    # Ghost distance shaping
-    ghost_safe_scale = 0.5       # reward for moving farther from a dangerous ghost
-    ghost_danger_scale = 0.7     # penalty for moving closer to a dangerous ghost
-    ghost_safety_radius = 5      # only shape when within this many tiles
+    # Reward shaping (slightly stronger ghost avoidance)
+    backtrack_penalty = 1.0       # small penalty for reversing
+    food_shaping_scale = 1.0      # small incentive for moving toward food
+    ghost_safe_scale = 3.0        # reward for moving farther from a dangerous ghost
+    ghost_danger_scale = 3.0      # penalty for moving closer to a dangerous ghost
+    ghost_safety_radius = 5
+    ghost_danger_radius = 3
 
     # Exploration
     initial_epsilon = 1.0
     min_epsilon = 0.05
-    epsilon_decay = 0.999
+    epsilon_decay = 0.9997
 
-    def __init__(self, qfile=None, load_model=False, device=None, debug_rewards = False):
+    def __init__(self, qfile=None, load_model=False, device=None, debug_rewards=False):
         super().__init__()
 
         self.qfile = qfile
@@ -81,20 +84,24 @@ class DeepQLearningAgent(Agent):
         # Tracking
         self.last_state_tensor = None
         self.last_action_idx = None
+        self.prev_action_idx = None
         self.last_score = 0.0
 
         self.episode_reward = 0.0
         self.episode_rewards = []
         self.global_step = 0
 
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = nn.SmoothL1Loss()
         self._pending_load = load_model
 
         self.last_food_dist = None
-        self.last_ghost_dist = None   # NEW
+        self.last_ghost_dist = None
 
-        self.debug_rewards = False
+        self.debug_rewards = debug_rewards
         self.debug_step_count = 0
+
+        # NEW: tile-level previous position (for hard anti-backtracking)
+        self.prev_tile = None
 
     def _closest_food_distance(self, state):
         """Return Manhattan distance from Pacman to nearest food, or None if no food."""
@@ -125,7 +132,6 @@ class DeepQLearningAgent(Agent):
             (a == Directions.WEST  and b == Directions.EAST)
         )
 
-
     def _init_networks_from_state(self, state):
         """Initialize networks based on layout size."""
         if self.policy_net is not None:
@@ -134,7 +140,7 @@ class DeepQLearningAgent(Agent):
         layout = state.data.layout
         width, height = layout.width, layout.height
 
-        in_channels = 9  # 9-channel input now
+        in_channels = 6  # 9-channel input now
         
         self.policy_net = PacmanCNN(width, height, self.n_actions, in_channels=in_channels).to(self.device)
         self.target_net = PacmanCNN(width, height, self.n_actions, in_channels=in_channels).to(self.device)
@@ -146,7 +152,6 @@ class DeepQLearningAgent(Agent):
         if self._pending_load and self.qfile:
             self._load_model()
             self._pending_load = False
-
 
     def _save_model(self):
         if not self.qfile or self.policy_net is None:
@@ -189,13 +194,15 @@ class DeepQLearningAgent(Agent):
         self.prev_action_idx = None
         self.last_score = state.getScore()
         self.last_food_dist = None
-        self.last_ghost_dist = None  
+        self.last_ghost_dist = None
         self.episode_reward = 0.0
+
+        # reset tile history
+        self.prev_tile = None
 
     def store_transition(self, s, a, s_next, r, done):
         """Store one transition in replay memory."""
         self.memory.append((s, a, s_next, r, done))
-        # print("MEMORY: ", self.memory.memory)
 
     def optimize_policy(self):
         """Sample a mini-batch and perform one gradient step."""
@@ -255,17 +262,12 @@ class DeepQLearningAgent(Agent):
             self.target_net.load_state_dict(self.policy_net.state_dict())
 
     def getAction(self, state):
-        print("ENTEREDDD")
         """
         Select and return an action.
-        
-        We:
-          - build a (9, H, W) tensor directly from GameState
-          - apply reward shaping based on score diff, distance to food, backtracking,
-            and distance to dangerous ghosts
-          - store transitions in replay
-          - optimize the policy_net
-          - choose epsilon-greedy action
+
+        Key idea: only choose a new action at intersections.
+        In corridors (non-intersections), keep moving in the same direction
+        as long as it's legal. This greatly reduces oscillation.
         """
         if self.policy_net is None:
             self._init_networks_from_state(state)
@@ -284,19 +286,13 @@ class DeepQLearningAgent(Agent):
 
             # Track components for debug
             base_reward = game_reward
-            positive_scale_applied = False
             food_shaping_delta = 0.0
             backtrack_delta = 0.0
             ghost_shaping_delta = 0.0
 
-            # Base: environment reward
+            # Base: environment reward (no huge multiplier)
             shaped_reward = game_reward
             
-            # Scale positive rewards (e.g., eating pellets, ghosts, win bonus)
-            if game_reward > 0:
-                shaped_reward = game_reward * 3
-                positive_scale_applied = True
-
             # --- Distance-to-food shaping ---
             if self.last_food_dist is not None and curr_food_dist is not None:
                 if curr_food_dist < self.last_food_dist:
@@ -306,40 +302,32 @@ class DeepQLearningAgent(Agent):
                     food_shaping_delta = -self.food_shaping_scale
                     shaped_reward += food_shaping_delta
 
-            # --- Backtrack penalty ---
+            # --- Backtrack penalty (direction-based) ---
             apply_backtrack = True
-            if curr_ghost_dist is not None and curr_ghost_dist <= self.ghost_safety_radius:
+            if curr_ghost_dist is not None and curr_ghost_dist <= self.ghost_danger_radius:
                 # Don't punish reversal when a dangerous ghost is close – might be escaping
                 apply_backtrack = False
 
             if apply_backtrack and self._is_reverse(self.last_action_idx, self.prev_action_idx):
                 backtrack_delta = -self.backtrack_penalty
                 shaped_reward += backtrack_delta
-            else:
-                backtrack_delta = 0.0
+
             # --- Ghost-distance shaping (dangerous ghosts only) ---
-            # Use change in distance to the nearest dangerous ghost,
-            # but only when within a safety radius.
             if self.last_ghost_dist is not None and curr_ghost_dist is not None:
-                # Check if we are / were in the "danger zone"
                 if (self.last_ghost_dist <= self.ghost_safety_radius or
-                    curr_ghost_dist <= self.ghost_safety_radius):
-                    
+                    curr_ghost_dist   <= self.ghost_safety_radius):
+
                     if curr_ghost_dist > self.last_ghost_dist:
-                        # Moved farther away from dangerous ghost => good
                         ghost_shaping_delta = self.ghost_safe_scale
                         shaped_reward += ghost_shaping_delta
                     elif curr_ghost_dist < self.last_ghost_dist:
-                        # Moved closer to dangerous ghost => bad
                         ghost_shaping_delta = -self.ghost_danger_scale
                         shaped_reward += ghost_shaping_delta
 
-            # --- DEBUG PRINTS ---
             if self.debug_rewards and self.debug_step_count < 2000:
                 print(
                     "[DQN][reward] "
                     f"Δscore={base_reward:+.1f} | "
-                    f"scaled_pos={positive_scale_applied} | "
                     f"food_delta={food_shaping_delta:+.2f} | "
                     f"backtrack_delta={backtrack_delta:+.2f} | "
                     f"ghost_delta={ghost_shaping_delta:+.2f} | "
@@ -362,35 +350,95 @@ class DeepQLearningAgent(Agent):
             )
             self.optimize_policy()
 
-        # --- Action selection (epsilon-greedy) ---
+        # --- Action selection (intersection-only DQN) ---
+
         legal_indices = state.getLegalActionsIndices(ACTION_LIST)
         if not legal_indices:
             legal_indices = [0]
 
-        if self.training and random.random() < self.epsilon:
-            action_idx = random.choice(legal_indices)
-        else:
-            with torch.no_grad():
-                q_vals = self.policy_net(
-                    state_tensor.unsqueeze(0).to(self.device)
-                ).squeeze(0)
+        # Decide if we're at an intersection
+        at_intersection = self._is_intersection(state)
 
-            q_vals = q_vals.cpu().tolist()
-            best_idx = max(legal_indices, key=lambda i: q_vals[i])
-            action_idx = int(best_idx)
+        # Default: keep going in same direction if we're NOT at an intersection
+        # and the previous action is still legal.
+        action_idx = None
+        if (not at_intersection and
+            self.last_action_idx is not None and
+            self.last_action_idx in legal_indices):
+            # Commit to previous direction (no new DQN decision here)
+            action_idx = self.last_action_idx
+        else:
+            # We are at an intersection (or forced to change because last action is illegal)
+            if self.training and random.random() < self.epsilon:
+                # Explore among legal moves
+                action_idx = random.choice(legal_indices)
+            else:
+                # Exploit: choose best Q among legal moves
+                with torch.no_grad():
+                    q_vec = self.policy_net(
+                        state_tensor.unsqueeze(0).to(self.device)
+                    ).squeeze(0)
+
+                    if self.training and (self.global_step % 5000 == 0):
+                        q_min = q_vec.min().item()
+                        q_max = q_vec.max().item()
+                        q_mean = q_vec.mean().item()
+                        print(f"[DQN][q] step={self.global_step} min={q_min:.2f} max={q_max:.2f} mean={q_mean:.2f}")
+
+                    if not torch.isfinite(q_vec).all():
+                        print("[DQN][warn] non-finite Q-values during action selection")
+
+                q_vals = q_vec.cpu().tolist()
+                best_idx = max(legal_indices, key=lambda i: q_vals[i])
+                action_idx = int(best_idx)
 
         # --- Update tracking for next step ---
+        curr_pos = state.getPacmanPosition()
+        cx, cy = int(round(curr_pos[0])), int(round(curr_pos[1]))
+
         self.prev_action_idx = self.last_action_idx
         self.last_state_tensor = state_tensor
         self.last_action_idx = action_idx
         self.last_food_dist = curr_food_dist
-        self.last_ghost_dist = curr_ghost_dist   # NEW: track ghost distance history
+        self.last_ghost_dist = curr_ghost_dist
+
+        # You can keep prev_tile if you want, but it's no longer used for forcing actions
+        self.prev_tile = (cx, cy)
 
         direction = ACTION_LIST[action_idx]
         return direction
+    def _is_intersection(self, state):
+        """
+        Return True if Pacman is at an intersection (a real decision point),
+        False if in a straight corridor or dead-end.
+
+        Logic:
+          - Get legal moves (excluding STOP)
+          - If there's only 1 move -> dead-end (not an intersection)
+          - If there are 2 moves and they are exact opposites (e.g., N/S or E/W)
+            -> straight corridor (not an intersection)
+          - Otherwise -> intersection (3+ ways or a turn)
+        """
+        legal_indices = state.getLegalActionsIndices(ACTION_LIST)
+        moves = [ACTION_LIST[i] for i in legal_indices if ACTION_LIST[i] != Directions.STOP]
+
+        if len(moves) <= 1:
+            return False  # dead-end or only one way to go -> no decision
+
+        if len(moves) > 2:
+            return True  # 3 or 4 ways -> definitely an intersection
+
+        # len(moves) == 2: check if they are exact opposites
+        a, b = moves[0], moves[1]
+        opposite = (
+            (a == Directions.NORTH and b == Directions.SOUTH) or
+            (a == Directions.SOUTH and b == Directions.NORTH) or
+            (a == Directions.EAST  and b == Directions.WEST)  or
+            (a == Directions.WEST  and b == Directions.EAST)
+        )
+        return not opposite  # if not opposite, it's a corner -> treat as intersection
 
 
-    
     def _closest_ghost_distance(self, state):
         # non-scared ghosts only
         ghost_positions = []
@@ -411,24 +459,16 @@ class DeepQLearningAgent(Agent):
 
         return min(abs(gx - px) + abs(gy - py) for gx, gy in ghost_positions)
 
-
-
     def final(self, state):
         """Called at the end of each game."""
-        # Training: final transition and optimization
         if self.training and self.last_state_tensor is not None and self.last_action_idx is not None:
             current_score = state.getScore()
             reward = current_score - self.last_score
-            
-            
             self.episode_reward += reward
-
             self.store_transition(self.last_state_tensor, self.last_action_idx, None, reward, True)
             self.optimize_policy()
 
-        # Track episode reward
         self.episode_rewards.append(self.episode_reward)
 
-        # Training: decay epsilon
         if self.training:
             self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)

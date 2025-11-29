@@ -39,7 +39,6 @@ code to run a game.  This file is divided into three sections:
 To play your first game, type 'python pacman.py' from the command line.
 The keys are 'a', 's', 'd', and 'w' to move (or arrow keys).  Have fun!
 """
-from deep_q_learning.cnn import MAX_PELLET_VALUE
 from game import GameStateData
 from game import Game
 from game import Directions
