@@ -496,7 +496,7 @@ class PacmanRules:
             # TODO: cache numFood?
             numFood = state.getNumFood()
             if numFood == 0 and not state.data._lose:
-                state.data.scoreChange += 500
+                state.data.scoreChange += 10_000  # Changing the win reward to 10,000
                 state.data._win = True
         # Eat capsule
         if(position in state.getCapsules()):
