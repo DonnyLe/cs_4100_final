@@ -434,8 +434,8 @@ def softmax(x, temp=1.0):
     return e_x / e_x.sum(axis=0)
 
 # Default experiment settings
-num_episodes = 25_000
-decay_rate = 0.99995
+num_episodes = 200_000
+decay_rate = 0.99999
 # Let's include the window size because at definitely changes the Q-table.
 qfile_name = f'Q_table_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.pickle'
 # qfile_name = f'Q_table_{num_episodes}_{decay_rate}.pickle'
