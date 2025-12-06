@@ -1,21 +1,21 @@
 ======================================================================
 DQN Agent Training Statistics
 ======================================================================
-Generated: 2025-11-27 16:57:26
+Generated: 2025-12-04 19:26:29
 ======================================================================
 
 TRAINING CONFIGURATION
 ----------------------------------------------------------------------
 Agent Type: dqn
-Number of Episodes: 100
-Runtime: 453.46 seconds (7.56 minutes)
+Number of Episodes: 10000
+Runtime: 59844.14 seconds (997.40 minutes)
 
 HYPERPARAMETERS
 ----------------------------------------------------------------------
 gamma: 0.99
 learning_rate: 0.0005
 epsilon: 1.0
-decay_rate: 0.99
+decay_rate: 0.9997
 min_epsilon: 0.05
 batch_size: 64
 discount_factor: 0.99
@@ -24,17 +24,17 @@ replay_memory_size: 50000
 
 PERFORMANCE METRICS
 ----------------------------------------------------------------------
-Average Reward: -376.54
-Std Dev Reward: 110.74
-Min Reward: -676.00
-Max Reward: 287.00
-Final Reward: -274.00
+Average Reward: 602.46
+Std Dev Reward: 595.65
+Min Reward: -203.00
+Max Reward: 2279.00
+Final Reward: 1402.00
 
 EXPLORATION
 ----------------------------------------------------------------------
 Initial Epsilon: 1.0000
-Final Epsilon: 0.3660
-Total Decay: 0.6340
+Final Epsilon: 0.0500
+Total Decay: 0.9500
 
 GAME CONFIGURATION
 ----------------------------------------------------------------------

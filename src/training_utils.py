@@ -11,6 +11,7 @@ from tqdm import tqdm
 from pacman import GameState
 import textDisplay
 from graphicsDisplay import PacmanGraphics
+import datetime
 
 
 OUTPUT_DIR = 'q_learning_data'
@@ -252,7 +253,6 @@ class TrainingSession:
     
     def _save_statistics(self, stats, **kwargs):
         """Save detailed statistics to a text file."""
-        import datetime
         
         # Build filename
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -280,9 +280,19 @@ class TrainingSession:
             # Hyperparameters
             f.write("HYPERPARAMETERS\n")
             f.write("-" * 70 + "\n")
-            hyperparams = ['gamma', 'learning_rate', 'epsilon', 'decay_rate', 'min_epsilon',
-                          'window_size', 'batch_size', 'discount_factor', 'target_sync_steps',
-                          'replay_memory_size']
+            hyperparams = [
+                'gamma',
+                'learning_rate',
+                'epsilon',
+                'decay_rate',
+                'min_epsilon',
+                'window_size',
+                'batch_size',
+                'discount_factor',
+                'target_sync_steps',
+                'replay_memory_size',
+                'use_reward_shaping',
+            ]
             for param in hyperparams:
                 if param in stats:
                     f.write(f"{param}: {stats[param]}\n")

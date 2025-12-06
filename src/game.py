@@ -623,29 +623,30 @@ class Game:
 
     def _at_intersection(self, agentIndex):
         """
-        Check if agent is at a grid intersection where it can make decisions.
-        Between grid points, agents must continue in their current direction.
-        
-        Returns True if at intersection, False if between grids.
+        Return True when the agent is at the center of a grid tile (a decision step),
+        and False when it is between tiles.
+
+        This keeps the optimization of reusing the previous action while
+        moving between grid points, but allows the agent to choose a new
+        action at *every* tile (corridors, corners, and junctions).
         """
         if agentIndex >= len(self.state.data.agentStates):
-            return True  # Safety fallback
-        
+            return True  # Safety fallback: let the agent decide
+
         agent_state = self.state.data.agentStates[agentIndex]
         if agent_state is None or agent_state.configuration is None:
             return True  # Safety fallback
-        
-        pos = agent_state.configuration.getPosition()
-        x, y = pos
-        x_int, y_int = int(x + 0.5), int(y + 0.5)
-        
-        TOLERANCE = 0.001
-        at_intersection = (abs(x - x_int) + abs(y - y_int) <= TOLERANCE)
-        
-        return at_intersection
 
-    OLD_STDOUT = None
-    OLD_STDERR = None
+        config = agent_state.configuration
+        x, y = config.getPosition()
+        x_int, y_int = int(x + 0.5), int(y + 0.5)
+
+        # If we're between grid points, we reuse the cached action
+        if abs(x - x_int) + abs(y - y_int) > Actions.TOLERANCE:
+            return False
+
+        # At the center of a grid cell: always treat as a decision step
+        return True
 
     def mute(self, agentIndex):
         if not self.muteAgents:
@@ -852,3 +853,5 @@ class Game:
                     self.unmute()
                     return
         self.display.finish()
+
+        

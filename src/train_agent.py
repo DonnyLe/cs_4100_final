@@ -57,7 +57,7 @@ def parse_args():
     parser.add_argument('--ghost-type', type=str, default='RandomGhost',
                        help='Ghost agent type (default: RandomGhost)')
     parser.add_argument('--episodes', type=int, default=1000,
-                       help='Number of episodes to run (default: )')
+                       help='Number of episodes to run (default: 1000)')
     parser.add_argument('--max-steps', type=int, default=200,
                        help='Maximum steps per episode (default: 200)')
     
@@ -86,6 +86,13 @@ def parse_args():
                        help='Observation window size (Q-learning only, default: 2)')
     parser.add_argument('--learning-rate', type=float, default=1e-3,
                        help='Learning rate (DQN only, default: 0.001)')
+    
+    # Reward shaping toggle (DQN only)
+    parser.add_argument(
+        '--no-reward-shaping',
+        action='store_true',
+        help='Disable DQN reward shaping (default: shaping enabled)'
+    )
     
     # Other options
     parser.add_argument('--random-rewards', action='store_true',
@@ -136,17 +143,27 @@ def create_agent(args):
         return agent, save_file, hyperparameters, 'qlearning'
     
     elif args.agent == 'dqn':
-        
-        # Generate default filename if not provided
+        # Decide where to save
         save_file = args.save_model
-        if args.train and save_file is None:
-            save_file = f'dqn_model_{args.episodes}.pt'
-        
+
+        if args.train:
+            # If no explicit save path, prefer continuing file or default name
+            if save_file is None:
+                save_file = args.load_model or f'dqn_model_{args.episodes}.pt'
+        else:
+            # In eval mode we don't necessarily need a save file
+            save_file = args.save_model  # usually None is fine
+
+        # Where to load from (if any)
+        load_path = args.load_model
+
         agent = DeepQLearningAgent(
-            qfile=save_file,
-            load_model=args.load_model is not None
+            qfile=save_file,                     # where to SAVE
+            load_model=load_path is not None,   # whether to LOAD
+            load_path=load_path,                # where to LOAD FROM
+            use_reward_shaping=not args.no_reward_shaping,
         )
-        
+
         # Override hyperparameters if provided
         agent.learning_rate = args.learning_rate
         agent.discount_factor = args.gamma
@@ -154,7 +171,7 @@ def create_agent(args):
         agent.epsilon = args.epsilon
         agent.min_epsilon = args.min_epsilon
         agent.epsilon_decay = args.decay_rate
-        
+
         # Store hyperparameters for logging
         hyperparameters = {
             'gamma': args.gamma,
@@ -171,9 +188,11 @@ def create_agent(args):
             'ghost_type': args.ghost_type,
             'max_steps': args.max_steps,
             'random_rewards': args.random_rewards,
+            'use_reward_shaping': agent.use_reward_shaping,
         }
-        
+
         return agent, save_file, hyperparameters, 'dqn'
+
     
     else:
         raise ValueError(f"Unknown agent type: {args.agent}")
