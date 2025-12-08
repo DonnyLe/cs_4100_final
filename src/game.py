@@ -739,8 +739,14 @@ class Game:
                         self.unmute()
                         return
                 else:
-                    observation = agent.observationFunction(
-                        self.state.deepCopy())
+                    # Adding this logic in to try to get it to stop making deep copies of 
+                    # the state every time.
+                    if hasattr(agent, 'needsDeepCopy') and agent.needsDeepCopy:
+                        observation = agent.observationFunction(
+                            self.state.deepCopy())
+                    else:
+                        observation = agent.observationFunction(
+                            self.state)
                 self.unmute()
             else:
                 observation = self.state.deepCopy()

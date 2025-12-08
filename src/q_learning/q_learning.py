@@ -27,8 +27,8 @@ ENV_WINDOW_SIZE = 2  # Play with this parameter to test different observation wi
 
 # This function is basically the same logic as the one from Programming Assignment 2, all we're doing here is turning each observed
 # state into a single integer so that it's easier to create and then lookup optimal actions from our Q-table.
-def hash_observation(obs):
-    '''cla
+def hashObservation(obs):
+    '''
     Hash the observed state into a single integer using base-7 encoding.
     Encoding:
     0 -> wall/out of bounds
@@ -67,7 +67,7 @@ def hash_observation(obs):
 
 # Taken from my PA2 assignment, this method is just a helper to help with plotting out the running average of rewards
 # over a training cycle.  Helps identify if the agent is actually getting better or just shitty the whole time.
-def training_rewards_plot(reward_df, num_episodes, decay_rate):
+def avg_training_rewards_plot(reward_df, num_episodes, decay_rate):
     reward_df = reward_df.sort_values('episode')
 
     plt.figure(figsize=(10, 6))
@@ -89,6 +89,32 @@ def training_rewards_plot(reward_df, num_episodes, decay_rate):
     plt.tight_layout()
 
     out_name = get_output_path(f"avg_reward_plot_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.png")
+    plt.savefig(out_name, dpi=300)
+    plt.close()
+
+
+def training_rewards_overtime(reward_df, num_episodes, decay_rate):
+    reward_df = reward_df.sort_values('episode')
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(
+        reward_df['episode'],
+        reward_df['static_rewards'],
+        color='#0072B2',
+        linewidth=2.0,
+        label='Reward per Episode'
+    )
+
+    long_title = f"Episode Rewards Over ({num_episodes:,.0f} Episodes, Decay Rate = {decay_rate})"
+    wrapped_title = "\n".join(textwrap.wrap(long_title, width=50))
+    plt.title(wrapped_title, fontsize=14, weight="bold", pad=15)
+    plt.xlabel("Episode", fontsize=13)
+    plt.ylabel("Reward per Episode", fontsize=13)
+    plt.grid(alpha=0.3)
+    plt.legend(fontsize=11)
+    plt.tight_layout()
+
+    out_name = get_output_path(f"rewards_overtime_plot_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.png")
     plt.savefig(out_name, dpi=300)
     plt.close()
 
@@ -116,6 +142,7 @@ class QLearningAgent(Agent):
         self.decay_rate = decay_rate
         self.min_epsilon = min_epsilon
         self.qfile = qfile
+        self.needsDeepCopy = False
         
         self.q_table = {}
         self.n_updates = {}
@@ -128,6 +155,12 @@ class QLearningAgent(Agent):
         self.last_score = 0.0
         self.episode_reward = 0.0
         self.episode_rewards = []
+
+        # Tracking statistics during evaluation:
+        self.total_actions = 0
+        self.qtable_actions = 0
+        self.random_actions = 0
+        self.new_states_encountered = 0
         
         # Load Q-table if specified
         if load_qtable and qfile:
@@ -170,8 +203,12 @@ class QLearningAgent(Agent):
         If not, then initalize a row in the Q-table for this newly observed state.
         '''
         if state_hash not in self.q_table:
+            self.new_states_encountered += 1
+            self.random_actions += 1
             self.q_table[state_hash] = np.zeros(self.n_actions, dtype=np.float64)
             self.n_updates[state_hash] = np.zeros(self.n_actions, dtype=np.float64)
+        else:
+            self.qtable_actions += 1
 
     def registerInitialState(self, state):
         '''Called at the start of each game.'''
@@ -179,6 +216,12 @@ class QLearningAgent(Agent):
         self.last_action_idx = None
         self.last_score = state.getScore()
         self.episode_reward = 0.0
+
+    def observationFunction(self, state):
+        '''In the game.py file, the pre-existing environment makes a deepcopy of the game state
+           at every step, becoming EXTREMELY costly for training my agent.  This method should
+           help with mitigating that extra time cost.'''
+        return state
 
     def getAction(self, state):
         '''
@@ -191,7 +234,7 @@ class QLearningAgent(Agent):
         # We have current state (awesome), just use the buildObservation method to get that partially observable
         # window around Pacman, then hash it to make our next moves.
         obs = state.buildObservation(window_size=self.window_size)
-        state_hash = hash_observation(obs)
+        state_hash = hashObservation(obs)
         self._ensure_state(state_hash)
 
         # Update Q-table from previous state-action pair
@@ -213,25 +256,29 @@ class QLearningAgent(Agent):
         if not legal_actions:
             legal_actions = [0]
 
-        # Epsilon-greedy action selection
-        if self.training and random.random() < self.epsilon:
-            action_idx = random.choice(legal_actions)
+        if not self.training:
+            self.total_actions += 1
+
+        # Want to use argmax for time constraints while we're training, but use softmax during evaluation.
+        if self.training:
+            if np.random.random() < self.epsilon:
+                action_index = np.random.choice(legal_actions)
+            else:
+                q_values = self.q_table[state_hash][legal_actions]
+                best_index = np.argmax(q_values)
+                action_index = legal_actions[best_index]
         else:
-            # Choose best legal action
-            q_values = self.q_table[state_hash]
-            best_value = -float('inf')
-            action_idx = legal_actions[0]
-            for legal_idx in legal_actions:
-                if q_values[legal_idx] > best_value:
-                    best_value = q_values[legal_idx]
-                    action_idx = legal_idx
+            try:
+                action_index = np.random.choice(legal_actions, p=softmax(self.q_table[state_hash][legal_actions]))
+            except Exception as e:
+                action_index = np.random.choice(legal_actions)
 
         # Store for next update
         self.last_state_hash = state_hash
-        self.last_action_idx = action_idx
+        self.last_action_idx = action_index
 
         # Return the direction (not index)
-        direction = ACTION_LIST[action_idx]
+        direction = ACTION_LIST[action_index]
         legal = state.getLegalPacmanActions()
         
         # Ensure direction is legal
@@ -239,22 +286,22 @@ class QLearningAgent(Agent):
             if Directions.STOP in legal and len(legal) > 1:
                 legal = [d for d in legal if d != Directions.STOP]
             direction = legal[0] if legal else Directions.STOP
-            # Update action_idx to match
+            # Update action_index to match
             self.last_action_idx = ACTION_LIST.index(direction)
 
         return direction
 
-    def _update_q(self, state_hash, action_idx, reward, next_state_hash, terminal):
+    def _update_q(self, state_hash, action_index, reward, next_state_hash, terminal):
         """Update Q-value using Q-learning rule."""
         if not self.training:
             return
         
         # Adaptive learning rate
-        eta = 1.0 / (1.0 + self.n_updates[state_hash][action_idx])
-        self.n_updates[state_hash][action_idx] += 1
+        eta = 1.0 / (1.0 + self.n_updates[state_hash][action_index])
+        self.n_updates[state_hash][action_index] += 1
         
         # Q-learning update
-        current_q = self.q_table[state_hash][action_idx]
+        current_q = self.q_table[state_hash][action_index]
         if terminal or next_state_hash is None:
             next_max = 0.0
         else:
@@ -262,7 +309,7 @@ class QLearningAgent(Agent):
             next_max = float(np.max(self.q_table[next_state_hash]))
         
         td_target = reward + self.gamma * next_max
-        self.q_table[state_hash][action_idx] = (1.0 - eta) * current_q + eta * td_target
+        self.q_table[state_hash][action_index] = (1.0 - eta) * current_q + eta * td_target
 
     def final(self, state):
         '''
@@ -296,4 +343,27 @@ class QLearningAgent(Agent):
         if not training:
             self.epsilon = 0.0  # No exploration during evaluation
 
-
+    def getEvalStats(self):
+        '''Method returns our agent stats during evaluation mode.'''
+        if self.total_actions == 0:
+            return {
+                'total_actions': 0,
+                'qtable_actions': 0,
+                'random_actions': 0,
+                'qtable_percentage': 0.0,
+                'random_percentage': 0.0,
+                'new_states_encountered': self.new_states_encountered
+            }
+        
+        return {
+            'total_actions': self.total_actions,
+            'qtable_actions': self.qtable_actions,
+            'random_actions': self.random_actions,
+            'qtable_percentage': self.qtable_actions / self.total_actions,
+            'random_percentage': self.random_actions / self.total_actions,
+            'new_states_encountered': self.new_states_encountered
+        }
+# Keeping softmax, helps agent optimally select actions.
+def softmax(x, temp=1.0):
+    e_x = np.exp((x - np.max(x)) / temp)
+    return e_x / e_x.sum(axis=0)
