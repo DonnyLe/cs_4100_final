@@ -443,13 +443,132 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
     Your minimax agent with alpha-beta pruning (question 3)
     """
 
-    def getAction(self, gameState):
+    def improvedUtility(self, gameState):
         """
-        Returns the minimax action using self.depth and self.evaluationFunction
+        Improved utility function for minimax: adds rewards for capturing pellets, penalizes danger (ghosts),
+        rewards being close to and eating food.
         """
-        "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
 
+        # terminal states - game is already won/lost
+        if gameState.isWin():
+            return float("inf")
+        if gameState.isLose():
+            return -float("inf")
+
+        score = gameState.getScore()
+        pacman = gameState.getPacmanPosition()
+        ghosts = gameState.getGhostStates()
+        ghostPositions = gameState.getGhostPositions()
+        food = gameState.getFood().asList()
+        capsules = gameState.getCapsules()
+        epsilon = 1e-6
+
+        # penalize getting closer to ghosts
+        for i, ghost in enumerate(ghosts):
+            gPosition = ghostPositions[i]
+            gDistance = util.manhattanDistance(pacman, gPosition)
+            if ghost.scaredTimer > 0 and gDistance > 0:
+                # if ghost is scared, Pacman should be rewarded for getting closer to it
+                score += 300.0 / gDistance
+
+            else :
+                # varying levels of penalties depending on proximity
+                if gDistance <= 1:
+                    score -= 500
+                elif gDistance <= 2:
+                    score -= 50
+                else:
+                    score -= 1.0 / gDistance
+            
+        # reward for getting closer to food
+        if food:
+            closestFoodDist = min(util.manhattanDistance(pacman, f) for f in food)
+            score += 10.0 / (closestFoodDist + epsilon)
+            score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
+            # prioritizes moving closer to a large amount of food so that Pacman doesn't get stuck on one side of the map with one pellet
+            avgFoodDist = sum(util.manhattanDistance(pacman, f) for f in food) / len(food)
+            score += 5.0 / (avgFoodDist + epsilon)
+            if pacman in food:
+                score += 500
+
+        # reward for getting closer to pellets
+        if capsules:
+            closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
+            score += 20.0 / (closestCap + epsilon)
+            # prioritize if ghosts are close
+            for gPos, gState in zip(ghostPositions, ghosts):
+                gDistance = util.manhattanDistance(pacman, gPos)
+                if gState.scaredTimer == 0 and gDistance <= 3:
+                    score += 30.0 / (closestCap + epsilon)
+
+        # penalize stalling / oscillation
+        # - came from initial observations of Pacman getting stuck at walls/doing back-and-forth motions
+        score += 500 / (len(food) + epsilon)
+
+        return float(score)
+
+    # def basicUtility(self, gameState):
+    #     """
+    #     Basic utility function that just returns the game score.
+    #     """
+    #     return gameState.getScore()
+    
+    def _alphabeta(self, state, depth, alpha, beta, agentIndex):
+        """Alpha-beta pruning recursive search."""
+        # check if end
+        if depth == 0 or state.isWin() or state.isLose():
+            return self.improvedUtility(state)
+
+        legal = state.getLegalActions(agentIndex)
+        if not legal:
+            return self.improvedUtility(state)
+
+        # maximizing player (pacman = agentindex = 0)
+        if agentIndex == 0:
+            value = -float("inf")
+            for action in legal:
+                succ = state.generateSuccessor(0, action)
+                value = max(value, self._alphabeta(succ, depth, alpha, beta, 1))
+                if value > beta:
+                    return value
+                alpha = max(alpha, value)
+            return value
+
+        # minimizing player (ghost = agentindex != 0)
+        else:
+            value = float("inf")
+            nextAgent = agentIndex + 1
+            nextDepth = depth - 1 if nextAgent == state.getNumAgents() else depth
+            if nextAgent == state.getNumAgents():
+                nextAgent = 0
+
+            for action in legal:
+                succ = state.generateSuccessor(agentIndex, action)
+                value = min(value, self._alphabeta(succ, nextDepth, alpha, beta, nextAgent))
+                if value < alpha:
+                    return value
+                beta = min(beta, value)
+            return value
+
+
+    def getAction(self, gameState):
+        """Returns best action using alpha-beta pruning."""
+        legal = [a for a in gameState.getLegalActions(0) if a != Directions.STOP]
+        if not legal: # stop if can't do anything else 
+            return Directions.STOP
+        
+        bestAction = legal[0]
+        alpha = -float("inf")
+        beta = float("inf")
+
+        for action in legal:
+            succ = gameState.generateSuccessor(0, action)
+            value = self._alphabeta(succ, self.depth, alpha, beta, 1)
+            if value > alpha:
+                alpha = value
+                bestAction = action
+
+        return bestAction
 def parse_args():
     """
     Helper to read arguments for evaluating the Minimax and AlphaBeta agents with a specified depth.
@@ -493,7 +612,8 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unknown agent type '{agent_type}'")
     
-    num_eval_games = 1
+    # eval params
+    num_eval_games = 1000
     layout_name = 'mediumClassic'
     num_ghosts = 2
     ghost_type = 'RandomGhost'
