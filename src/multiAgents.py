@@ -415,7 +415,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
             nextAgent = agentIndex + 1
             nextDepth = depth
 
-            # once we reach the last ghost, cycle back to Pacman agent and decrease depth
+            # once we reach the last ghost, we cycle back to Pacman agent and decrease depth
             if nextAgent == numAgents:
                 nextAgent = 0
                 nextDepth -= 1
@@ -466,12 +466,22 @@ def parse_args():
             depth = int(args[i+1])
 
     return agent_type, depth
-
+"""
+The remaining code provides the evaluation mode for the Minimax and AlphaBeta agents.
+In order to run the evaluation games, you can pass in two arguments:
+- agent_type - 'Minimax' or 'AlphaBeta' (defuault: 'Minimax')
+- depth - any integer value (default: 2 - should be kept small for time/space complexity)
+For example, running:
+- python multiAgents.py
+-- will run 1000 medium-classic games with 2 ghosts, using a Minimax agent with depth 2
+- python multiAgents.py --
+"""
 if __name__ == "__main__":
     agent_type, depth = parse_args()
 
     print(f"Evaluation using - Agent: {agent_type}, Depth: {depth}")
 
+    # allows us to compare our Minimax and AlphaBeta agents by running the same evaluation config/params
     if agent_type == "Minimax":
         agent = MinimaxAgent(depth=depth)
     elif agent_type == "AlphaBeta":
@@ -479,8 +489,7 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unknown agent type '{agent_type}'")
     
-    # eval params
-    num_eval_games = 1000
+    num_eval_games = 1
     layout_name = 'mediumClassic'
     num_ghosts = 2
     ghost_type = 'RandomGhost'
@@ -491,7 +500,7 @@ if __name__ == "__main__":
     ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
     display = NullGraphics()
 
-    # since minimax has no training, we will run several iterations of eval games
+    # since minimax has no training, we just run several games to calculate the performance using the average over all games
     print(f"Running {num_eval_games} evaluation games\n")
 
     time_start = time.perf_counter()
@@ -510,7 +519,7 @@ if __name__ == "__main__":
     )
     time_end = time.perf_counter()
 
-    # collect stats
+    # collect score, win rate, and time stats over all games
     scores = [g.state.getScore() for g in games]
     wins = [g.state.isWin() for g in games]
     try:
