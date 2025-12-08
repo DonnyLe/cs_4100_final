@@ -23,7 +23,7 @@ import time
 import pacman as pac
 import layout as pac_layout
 import ghostAgents
-from q_learning import runGamesQuiet
+from training_utils import runGamesQuiet
 from textDisplay import NullGraphics
 
 class Node:
@@ -466,15 +466,19 @@ def parse_args():
             depth = int(args[i+1])
 
     return agent_type, depth
+
+
 """
 The remaining code provides the evaluation mode for the Minimax and AlphaBeta agents.
 In order to run the evaluation games, you can pass in two arguments:
 - agent_type - 'Minimax' or 'AlphaBeta' (defuault: 'Minimax')
 - depth - any integer value (default: 2 - should be kept small for time/space complexity)
-For example, running:
+
+Here are sample configurations:
 - python multiAgents.py
--- will run 1000 medium-classic games with 2 ghosts, using a Minimax agent with depth 2
-- python multiAgents.py --
+-- Will run 1000 medium-classic games with 2 ghosts, using the Minimax agent with depth 2
+- python multiAgents.py --agent AlphaBeta --depth 3
+-- Will run 1000 medium-classic games with 2 ghosts, using the AlphaBeta agent with depth 3
 """
 if __name__ == "__main__":
     agent_type, depth = parse_args()
@@ -500,7 +504,7 @@ if __name__ == "__main__":
     ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
     display = NullGraphics()
 
-    # since minimax has no training, we just run several games to calculate the performance using the average over all games
+    # since these agents have no training, we just run several games to calculate the performance using the average over all games
     print(f"Running {num_eval_games} evaluation games\n")
 
     time_start = time.perf_counter()
@@ -519,7 +523,7 @@ if __name__ == "__main__":
     )
     time_end = time.perf_counter()
 
-    # collect score, win rate, and time stats over all games
+    # output score, win rate, and time stats over all games
     scores = [g.state.getScore() for g in games]
     wins = [g.state.isWin() for g in games]
     try:
@@ -532,7 +536,6 @@ if __name__ == "__main__":
     total_time = time_end - time_start
     time_per_game = total_time / num_eval_games
 
-    # print stats (similar to PA2)
     print(f"{agent} Agent Evaluation Stats")
     print(f"Games played: {num_eval_games}")
     print(f"Average score: {avg_score:.2f}")
