@@ -50,6 +50,9 @@ import layout
 import sys
 import types
 import time
+from util import nearestPoint
+import numpy as _np
+import torch as _torch
 import random
 import os
 
@@ -340,6 +343,76 @@ class GameState:
             'scared_ghost_in_cell': any(ghost_map.get((px, py), [])),
             'window_size': window_size,
         }
+    
+
+
+    def buildFullObservationTensor(self):
+        """
+        Fast path: directly build a (6, H, W) tensor for the CNN, avoiding
+        per-cell dicts and a second pass.
+
+        Channels:
+          0: walls
+          1: food value normalized (0-1, 0 if no food)
+          2: capsules
+          3: ghosts
+          4: scared ghosts
+          5: pacman position
+        """
+        
+        
+
+        # Pacman position
+        current_position = self.getPacmanPosition()
+        px, py = int(round(current_position[0])), int(round(current_position[1]))
+
+        walls = self.getWalls()
+        food = self.getFood()  # int grid: 0 = empty, >0 = pellet reward
+        capsules = set((int(x), int(y)) for x, y in self.getCapsules())
+        width, height = walls.width, walls.height
+
+        # Ghost map: (x,y) -> list of scared flags
+        ghost_map = {}
+        for ghost_state in self.getGhostStates():
+            gpos = ghost_state.getPosition()
+            if gpos is None:
+                continue
+            gx, gy = nearestPoint(gpos)
+            gx, gy = int(gx), int(gy)
+            ghost_map.setdefault((gx, gy), []).append(ghost_state.scaredTimer > 0)
+
+        n_channels = 6
+        arr = _np.zeros((n_channels, height, width), dtype=_np.float32)
+
+        for x in range(width):
+            for y in range(height):
+                # Channel 0: walls
+                if walls[x][y]:
+                    arr[0, y, x] = 1.0
+
+                # Channel 1: food value normalized
+                val = food[x][y]
+                if val > 0:
+                    norm = min(float(val), MAX_PELLET_VALUE) / MAX_PELLET_VALUE
+                    arr[1, y, x] = norm
+
+                # Channel 2: capsules
+                if (x, y) in capsules:
+                    arr[2, y, x] = 1.0
+
+                # Channels 3 & 4: ghosts vs scared ghosts
+                for scared in ghost_map.get((x, y), []):
+                    if scared:
+                        arr[4, y, x] = 1.0
+                    else:
+                        arr[3, y, x] = 1.0
+
+        # Channel 5: Pacman position
+        if 0 <= px < width and 0 <= py < height:
+            arr[5, py, px] = 1.0
+
+        return _torch.from_numpy(arr)  # (6, H, W)
+
 
     def stepWithGhosts(self, pacman_action, ghost_agents):
         '''
@@ -485,21 +558,22 @@ class PacmanRules:
     def consume(position, state):
         x, y = position
         # Eat food
-        if state.data.food[x][y]:
-            # Get the reward value from the pellet (default 10, or integer value if randomRewards enabled)
-            # Use type() check because isinstance(True, int) returns True (booleans are int subclass)
-            reward = state.data.food[x][y] if type(state.data.food[x][y]) == int else 10
+        x, y = position
+        val = state.data.food[x][y]
+        if val > 0:
+            reward = val
             state.data.scoreChange += reward
             state.data.food = state.data.food.copy()
-            state.data.food[x][y] = False
+            state.data.food[x][y] = 0      # 0 = empty
             state.data._foodEaten = position
             # TODO: cache numFood?
             numFood = state.getNumFood()
             if numFood == 0 and not state.data._lose:
                 state.data.scoreChange += 10_000  # Changing the win reward to 10,000
                 state.data._win = True
+
         # Eat capsule
-        if(position in state.getCapsules()):
+        if (position in state.getCapsules()):
             state.data.capsules.remove(position)
             state.data._capsuleEaten = position
             # Reset all ghosts' scared timers
@@ -654,6 +728,15 @@ def readCommand(argv):
                       help=default(
                           'the agent TYPE in the pacmanAgents module to use'),
                       metavar='TYPE', default='KeyboardAgent')
+    parser.add_option('--algo', dest='algo',
+                  help='RL algorithm: q or dqn',
+                  choices=['q', 'dqn'], default=None)
+    parser.add_option('--mode', dest='mode',
+                    help='RL mode: train or eval',
+                    choices=['train', 'eval'], default=None)
+    parser.add_option('--qfile', dest='qfile',
+                    help='Q-table filename (for Q-learning eval)', default=None)
+
     parser.add_option('-t', '--textGraphics', action='store_true', dest='textGraphics',
                       help='Display output as text only', default=False)
     parser.add_option('-q', '--quietTextGraphics', action='store_true', dest='quietGraphics',
