@@ -54,7 +54,12 @@ def runGamesQuiet(layout, pacman, ghosts, display, numGames, record,
     use_gui = isinstance(display, PacmanGraphics)
     
     for i in tqdm(range(numGames), desc="Games", unit="game", disable=use_gui):
+         # Clears the gameState from memory so we're not stacking up.
+
         GameState.getAndResetExplored()
+
+         # To suppress output from the OG setup, we need to use NullGraphics
+
         if use_gui:
             gameDisplay = display
         else:
@@ -62,7 +67,7 @@ def runGamesQuiet(layout, pacman, ghosts, display, numGames, record,
         
         game = rules.newGame(layout, pacman, ghosts, gameDisplay, True, catchExceptions)
         game.run()
-        games.append(game)
+        games.append(game) # Always append, unlike original runGames
     
     return games
 
@@ -210,9 +215,11 @@ class TrainingSession:
             print(f"Final Reward: {stats['final_reward']:.2f}")
             
             if hasattr(self.agent, 'epsilon'):
-                stats['initial_epsilon'] = self.agent.initial_epsilon
+                # Assume the agent stores its initial epsilon (you already do this in DQN)
+                stats['initial_epsilon'] = getattr(self.agent, 'initial_epsilon', None)
                 stats['final_epsilon'] = self.agent.epsilon
-                print(f"Initial Epsilon: {stats['initial_epsilon']:.4f}")
+                if stats['initial_epsilon'] is not None:
+                    print(f"Initial Epsilon: {stats['initial_epsilon']:.4f}")
                 print(f"Final Epsilon: {stats['final_epsilon']:.4f}")
             
             if hasattr(self.agent, 'q_table'):
@@ -230,7 +237,8 @@ class TrainingSession:
                 running_avg = np.cumsum(rewards) / np.arange(1, len(rewards) + 1)
                 reward_df = pd.DataFrame({
                     "episode": np.arange(len(rewards)),
-                    "avg_reward": running_avg
+                    "avg_reward": running_avg,
+                    "static_rewards": rewards,
                 })
                 
                 # Save CSV
@@ -243,13 +251,14 @@ class TrainingSession:
                 reward_df.to_csv(csv_name, index=False)
                 print(f"Saved reward data to: {csv_name}")
                 
-                # Generate plot
+                # Generate plot (running average like before)
                 plot_training_rewards(
                     reward_df, len(rewards), self.agent_name,
                     agent_type=self.agent_type, **plot_kwargs
                 )
         
         print(f"{'='*60}\n")
+
     
     def _save_statistics(self, stats, **kwargs):
         """Save detailed statistics to a text file."""
@@ -341,7 +350,6 @@ class TrainingSession:
         
         print(f"Saved training statistics to: {stats_path}")
 
-
 class EvaluationSession:
     """
     Manages an evaluation session for a trained RL agent.
@@ -354,6 +362,7 @@ class EvaluationSession:
         self.start_time = None
         self.end_time = None
         self.games = []
+        self.hyperparameters = {}  # may be filled by caller (train_agent)
         
     def run(self, layout, ghosts, display, num_games,
             max_steps=None, catchExceptions=False, timeout=30, randomRewards=False):
@@ -407,36 +416,58 @@ class EvaluationSession:
         except AttributeError:
             episode_lengths = []
         
+        avg_score = np.mean(scores) if scores else 0.0
+        std_score = np.std(scores) if scores else 0.0
+        win_rate = (sum(wins) / len(wins)) if wins else 0.0
+        avg_length = np.mean(episode_lengths) if episode_lengths else 0.0
+        
+        total_eval_time = duration
+        total_eval_time_min = int(total_eval_time // 60)
+        eval_time_remaining_sec = int(total_eval_time % 60)
+        
         print(f"\n{'='*60}")
         print(f"{self.agent_name} Evaluation Results")
         print(f"{'='*60}")
         print(f"Games Played: {len(self.games)}")
-        print(f"Average Score: {np.mean(scores):.2f}")
-        print(f"Score Std Dev: {np.std(scores):.2f}")
-        print(f"Win Rate: {sum(wins)/len(wins):.2%} ({sum(wins)}/{len(wins)})")
+        print(f"Average Reward: {avg_score:.2f}")
+        print(f"Score Std Dev: {std_score:.2f}")
+        print(f"Win Rate: {win_rate:.2%} ({sum(wins)}/{len(wins)})")
         
         if episode_lengths:
-            print(f"Average Episode Length: {np.mean(episode_lengths):.2f} moves")
+            print(f"Average Episode Length: {avg_length:.2f} moves")
         
-        print(f"Evaluation Runtime: {duration:.2f} seconds ({duration/60:.2f} minutes)")
+        print(f"Time taken to run {len(self.games)} evaluations: {total_eval_time:.2f} sec")
+        print(f"Time taken (minutes): {total_eval_time_min}:{eval_time_remaining_sec:02d}")
+        
+        # If the agent exposes detailed eval stats (like QLearningAgent)
+        eval_stats = None
+        if hasattr(self.agent, "getEvalStats"):
+            eval_stats = self.agent.getEvalStats()
+            print(f"Total Actions: {eval_stats['total_actions']}")
+            print(f"Q-table Actions: {eval_stats['qtable_actions']}")
+            print(f"Random Actions: {eval_stats['random_actions']}")
+            print(f"Percentage of Actions taken using Q-table: {eval_stats['qtable_percentage']:.2%}")
+            print(f"Percentage of Random Actions Taken: {eval_stats['random_percentage']:.2%}")
+            print(f"New States Encountered: {eval_stats['new_states_encountered']}")
+        
         print(f"{'='*60}\n")
         
         results = {
             'num_games': len(self.games),
-            'avg_score': np.mean(scores),
-            'std_score': np.std(scores),
-            'win_rate': sum(wins)/len(wins),
+            'avg_score': avg_score,
+            'std_score': std_score,
+            'win_rate': win_rate,
             'wins': sum(wins),
-            'avg_length': np.mean(episode_lengths) if episode_lengths else None,
-            'duration': duration
+            'avg_length': avg_length if episode_lengths else None,
+            'duration': duration,
         }
         
         # Save evaluation results to file
-        self._save_evaluation_stats(results, scores, wins, episode_lengths)
+        self._save_evaluation_stats(results, scores, wins, episode_lengths, eval_stats)
         
         return results
     
-    def _save_evaluation_stats(self, results, scores, wins, episode_lengths):
+    def _save_evaluation_stats(self, results, scores, wins, episode_lengths, eval_stats=None):
         """Save detailed evaluation statistics to a text file."""
         import datetime
         
@@ -452,26 +483,35 @@ class EvaluationSession:
             f.write(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("="*70 + "\n\n")
             
-            # Summary Statistics
+            # Summary
             f.write("SUMMARY STATISTICS\n")
             f.write("-" * 70 + "\n")
+            f.write(f"Agent Type: {self.agent_type}\n")
             f.write(f"Games Played: {results['num_games']}\n")
             f.write(f"Wins: {results['wins']}\n")
             f.write(f"Win Rate: {results['win_rate']:.2%}\n")
             f.write(f"Evaluation Runtime: {results['duration']:.2f} seconds ({results['duration']/60:.2f} minutes)\n")
             f.write("\n")
             
-            # Score Statistics
+            # Hyperparameters / Config (if provided)
+            if self.hyperparameters:
+                f.write("HYPERPARAMETERS / CONFIGURATION\n")
+                f.write("-" * 70 + "\n")
+                for k, v in self.hyperparameters.items():
+                    f.write(f"{k}: {v}\n")
+                f.write("\n")
+            
+            # Score statistics
             f.write("SCORE STATISTICS\n")
             f.write("-" * 70 + "\n")
             f.write(f"Average Score: {results['avg_score']:.2f}\n")
-            f.write(f"Std Dev: {results['std_score']:.2f}\n")
+            f.write(f"Std Dev Score: {results['std_score']:.2f}\n")
             f.write(f"Min Score: {min(scores):.2f}\n")
             f.write(f"Max Score: {max(scores):.2f}\n")
             f.write(f"Median Score: {np.median(scores):.2f}\n")
             f.write("\n")
             
-            # Episode Length Statistics
+            # Episode length stats
             if episode_lengths:
                 f.write("EPISODE LENGTH STATISTICS\n")
                 f.write("-" * 70 + "\n")
@@ -481,7 +521,19 @@ class EvaluationSession:
                 f.write(f"Median Length: {np.median(episode_lengths):.0f} moves\n")
                 f.write("\n")
             
-            # Individual Game Results
+            # Q-learning specific evaluation stats (if available)
+            if eval_stats is not None:
+                f.write("Q-LEARNING EVALUATION STATISTICS\n")
+                f.write("-" * 70 + "\n")
+                f.write(f"Total Actions: {eval_stats['total_actions']}\n")
+                f.write(f"Q-table Actions: {eval_stats['qtable_actions']}\n")
+                f.write(f"Random Actions: {eval_stats['random_actions']}\n")
+                f.write(f"Q-table Action Percentage: {eval_stats['qtable_percentage']:.2%}\n")
+                f.write(f"Random Action Percentage: {eval_stats['random_percentage']:.2%}\n")
+                f.write(f"New States Encountered: {eval_stats['new_states_encountered']}\n")
+                f.write("\n")
+            
+            # Individual game results
             f.write("INDIVIDUAL GAME RESULTS\n")
             f.write("-" * 70 + "\n")
             f.write(f"{'Game':<6} {'Win':<6} {'Score':<10} {'Length':<10}\n")

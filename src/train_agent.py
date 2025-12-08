@@ -266,8 +266,8 @@ def main():
             sys.exit(1)
         
         agent.setTraining(False)
-        
         session = EvaluationSession(agent, agent_name, agent_type=agent_type)
+        session.hyperparameters = hyperparameters  # Store hyperparameters for logging
         session.run(
             layout=layout,
             ghosts=ghosts,
