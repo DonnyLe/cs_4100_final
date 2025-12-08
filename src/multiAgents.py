@@ -23,7 +23,7 @@ import time
 import pacman as pac
 import layout as pac_layout
 import ghostAgents
-from q_learning import runGamesQuiet
+from training_utils import runGamesQuiet
 from textDisplay import NullGraphics
 
 class Node:
@@ -256,287 +256,10 @@ class LocalQAgent(Agent):
         except Exception as exc:
             print(f"[LocalQAgent] Failed to save Q-table: {exc}")
 
-    """
-    A reflex agent chooses an action at each choice point by examining
-    its alternatives via a state evaluation function.
-
-    The code below is provided as a guide.  You are welcome to change
-    it in any way you see fit, so long as you don't touch our method
-    headers.
-    """
-
-    def goalTest(self, gs, pos, flag):
-        # Looking for food
-        if(flag == 0):
-            if(gs.hasFood(pos[0], pos[1])):
-                return True
-            return False
-        # Looking for ghost
-        if(flag == 1):
-            gpos = gs.getGhostPositions()
-            for gp in gpos:
-                if(gp == pos):
-                    return True
-            return False
-        
-
-    def DLS(self, currentNode, stack, explored, layer, limit, found, flag):
-        explored.append(currentNode)
-        if(self.goalTest(currentNode.parent.state, currentNode.state.getPacmanPosition(), flag)):
-            stack.push(currentNode)
-            return stack, explored, True
-        if(layer == limit):
-            return stack, explored, False
-        stack.push(currentNode)
-        actions = currentNode.state.getLegalActions()
-        for a in actions:
-            newState = currentNode.state.generatePacmanSuccessor(a)
-            newNode = Node(newState, currentNode, a, 1)
-            if newNode in explored:
-                continue
-            stack, explored, found = self.DLS(newNode, stack, explored, layer+1, limit, found, flag)
-            if(found):
-                return stack, explored, True
-        stack.pop()
-        return stack, explored, False
-    
-    def IDS(self, sgs, limit, flag):
-        found = False
-        current_limit = 0
-        while(not found and current_limit <= limit):
-            current_limit = current_limit + 1
-            startNode = Node(sgs, None, None, 0)
-            startNode.parent = startNode
-            stack = Stack()
-            explored = []
-            stack, explored, found = self.DLS(startNode, stack, explored, 1, current_limit, False, flag)
-
-        actions = []
-        while(not stack.isEmpty()):
-            node = stack.pop()
-            actions.append(node.action)
-
-        if not actions:
-            return actions, found
-        
-        actions.reverse()
-        actions.pop(0)  # Removes start node from actions
-
-        return actions, found
-
-
-    def getAction(self, gameState):
-        """
-        You do not need to change this method, but you're welcome to.
-
-        getAction chooses among the best options according to the evaluation function.
-
-        getAction takes a GameState and returns some Directions.X for some X
-        in the set {NORTH, SOUTH, WEST, EAST, STOP}
-        """
-        # Collect legal moves and successor states
-        legalMoves = gameState.getLegalActions()
-
-        weights = np.loadtxt("weights.csv", delimiter=",")
-        new_weights = np.array(weights)
-
-        # Choose one of the best actions
-        scores = []
-        for action in legalMoves:
-            [s,new_weights] = self.evaluationFunction(gameState, action, weights, new_weights)
-            scores.append(s)
-        
-        bestScore = max(scores)
-        allIndices = [index for index in range(len(scores))]
-        bestIndices = [index for index in range(len(scores)) if scores[index] == bestScore]
-        chosenIndex = random.choice(bestIndices) # Pick randomly among the best
-        #chosenIndex = random.choice(allIndices) # Pick randomly among the best
-
-
-        "Add more of your code here if you want to"
-
-        np.savetxt("weights.csv", new_weights, delimiter=",", fmt='%4.8f')
-
-        return legalMoves[chosenIndex]
-
-    def CalcGhostPos(self, cgs, actions):
-        for a in actions:
-            cgs = cgs.generatePacmanSuccessor(a)
-        return cgs.getPacmanPosition()
-
-    # Find all active and scared ghosts and then turn them into binary features
-    def findAllGhosts(self, cgs):
-        f1 = 0  # Active ghost one step away (Binary)
-        f2 = 0  # Active ghost two steps away (Binary)
-        f3 = 0  # Scared ghost one step away (Binary)
-        f4 = 0  # Scared ghost two steps away (Binary)
-        actions, found = self.IDS(cgs, 3, 1)
-        if not found:
-            return f1, f2, f3, f4
-        ghosts = cgs.getGhostStates()
-        ghostPos = self.CalcGhostPos(cgs, actions)
-        foundGhostPosition = False
-        for g in ghosts:
-            if(ghostPos == g.configuration.pos):
-                ghost = g
-                foundGhostPosition = True
-                break
-        
-        if not foundGhostPosition:
-            return f1, f2, f3, f4
-
-        if(ghost.scaredTimer > 0):  # If ghost is scared
-            if(len(actions) <= 1):
-                f3 = 1
-            if(len(actions) == 2):
-                f4 = 1
-        if(ghost.scaredTimer == 0): # If ghost is active
-            if(len(actions) <= 1):
-                f1 = 1
-            if(len(actions) == 2):
-                f2 = 1
-
-        return f1, f2, f3, f4
-
-
-    # Active ghost one step away (Binary)
-    def getFeatureOne(self, cgs):
-        actions, found = self.IDS(cgs, 2, 1)
-        if(found):
-            if(len(actions) <= 1):
-                return 1
-        else:
-            return 0
-
-    # Active ghost two steps away (Binary)
-    def getFeatureTwo(self, cgs):
-        actions, found = self.IDS(cgs, 3, 1)
-        if(found):
-            if(len(actions) == 2):
-                return 1
-        else:
-            return 0
-
-    # Scared ghost one step away (Binary)
-    def getFeatureThree(self, cgs):
-        ghosts = cgs.getGhostStates()
-        if not ghosts:
-            return 0
-        g = ghosts[0]
-        if(g.scaredTimer > 0):
-            actions, found = self.IDS(cgs, 2, 1)
-            if(found):
-                if(len(actions) <= 1):
-                    return 1
-            else:
-                return 0
-        return 0
-
-    # Scared ghost two steps away (Binary)
-    def getFeatureFour(self, cgs):
-        ghosts = cgs.getGhostStates()
-        if not ghosts:
-            return 0
-        g = ghosts[0]
-        if(g.scaredTimer > 0):
-            actions, found = self.IDS(cgs, 3, 1)
-            if(found):
-                if(len(actions) == 2):
-                    return 1
-            else:
-                return 0
-        return 0
-        
-    # Eating Food (Binary)
-    def getFeatureFive(self, cgs, sgs):
-        if(self.goalTest(cgs, sgs.getPacmanPosition(), 0)):
-            return 1
-        return 0
-
-    # Distance to closest food
-    def getFeatureSix(self, cgs):
-        #actions, found = self.IDS(cgs, 3, 0)
-        #if(found):
-        #    return 1/len(actions)
-        
-        food = cgs.getFood()
-        pacPos = cgs.getPacmanPosition()
-        dist = []
-        x_size = food.width
-        y_size = food.height
-        for x in range(0, x_size):
-            for y in range(0, y_size):
-                if(food[x][y] == True):
-                    dist.append(manhattanDistance(pacPos, (x,y)))
-        if not dist:
-            return 0
-        closestFood = min(dist)
-        return 1/closestFood
-
-    # Get instantaneous reward 
-    def getReward(self, cgs, sgs):
-        pacPos = sgs.getPacmanPosition()
-        gpos = cgs.getGhostPositions()
-        ghosts = cgs.getGhostStates()
-        g = ghosts[0]
-        for pos in gpos:
-            if(pacPos == pos and g.scaredTimer == 0):
-                return -250
-            if(pacPos == pos and g.scaredTimer > 1):
-                return 100
-        if(cgs.hasFood(pacPos[0], pacPos[1])):
-            if(cgs.getNumFood() <= 1):
-                return 250
-            return 1
-        return -1
-    
-
-    def evaluationFunction(self, currentGameState, action, weights, new_weights):
-       
-        # Useful information you can extract from a GameState (pacman.py)
-        successorGameState = currentGameState.generatePacmanSuccessor(action)
-
-        # Get features for current state
-        f1, f2, f3, f4 = self.findAllGhosts(successorGameState)
-        f5 = self.getFeatureFive(currentGameState, successorGameState)
-        f6 = self.getFeatureSix(successorGameState)
-        features = np.array([f1, f2, f3, f4, f5, f6])
-        Q_s_a = np.dot(weights, np.transpose(features))
-
-        # Generate Q(s', a')
-        Qs = []
-        legalMoves = successorGameState.getLegalActions()
-        for a in legalMoves:
-            ngs = successorGameState.generatePacmanSuccessor(a)
-            f1_next, f2_next, f3_next, f4_next = self.findAllGhosts(ngs) 
-            f5_next = self.getFeatureFive(successorGameState, ngs)
-            f6_next = self.getFeatureSix(ngs)
-            features_next = np.array([f1_next, f2_next, f3_next, f4_next, f5_next, f6_next])
-            Q_next = np.dot(weights, np.transpose(features_next))
-            Qs.append(Q_next)
-        if not Qs:
-            Q_next = 0
-        else:
-            Q_next = max(Qs)
-
-        r = self.getReward(currentGameState, successorGameState)
-
-        alpha = 0.00001
-        gamma = 0.9
-        diff = (r + gamma*Q_next) - Q_s_a
-        
-        for w in range(0,6):
-            new_weights[w] = new_weights[w] + alpha*diff*features[w]
-
-        return [Q_s_a, new_weights]    # Q state calculated with old weights
-
-    pass
-
 def scoreEvaluationFunction(currentGameState):
     """
     This default evaluation function just returns the score of the state.
     The score is the same one displayed in the Pacman GUI.
-
     This evaluation function is meant for use with adversarial search agents
     (not reflex agents).
     """
@@ -571,7 +294,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
     """
     def basicUtility(self, gameState):
         """
-        Basic utility function that just returns the game score.
+        Basic utility function that just returns the game score (the same one displayed in the Pacman GUI).
         """
         return gameState.getScore()
     
@@ -623,7 +346,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
             if pacman in food:
                 score += 500
 
-        # reward for getting closer to pellets
+        # reward for getting closer to power capsules
         if capsules:
             closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
             score += 20.0 / (closestCap + epsilon)
@@ -692,7 +415,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
             nextAgent = agentIndex + 1
             nextDepth = depth
 
-            # once we reach the last ghost, cycle back to Pacman agent and decrease depth
+            # once we reach the last ghost, we cycle back to Pacman agent and decrease depth
             if nextAgent == numAgents:
                 nextAgent = 0
                 nextDepth -= 1
@@ -714,10 +437,6 @@ class MinimaxAgent(MultiAgentSearchAgent):
 
         self.lastPos = gameState.getPacmanPosition()
         return self._minimax_decision(gameState, depth=2)
-    
-    # Notes:
-    # check Pacman speed should be 0.5 so it can't outurn the ghost?
-    # increasing penalty if no new pellet is eaten which resets once a pellet is eaten
 
 class AlphaBetaAgent(MultiAgentSearchAgent):
     """
@@ -867,11 +586,25 @@ def parse_args():
 
     return agent_type, depth
 
+
+"""
+The remaining code provides the evaluation mode for the Minimax and AlphaBeta agents.
+In order to run the evaluation games, you can pass in two arguments:
+- agent_type - 'Minimax' or 'AlphaBeta' (defuault: 'Minimax')
+- depth - any integer value (default: 2 - should be kept small for time/space complexity)
+
+Here are sample configurations:
+- python multiAgents.py
+-- Will run 1000 medium-classic games with 2 ghosts, using the Minimax agent with depth 2
+- python multiAgents.py --agent AlphaBeta --depth 3
+-- Will run 1000 medium-classic games with 2 ghosts, using the AlphaBeta agent with depth 3
+"""
 if __name__ == "__main__":
     agent_type, depth = parse_args()
 
     print(f"Evaluation using - Agent: {agent_type}, Depth: {depth}")
 
+    # allows us to compare our Minimax and AlphaBeta agents by running the same evaluation config/params
     if agent_type == "Minimax":
         agent = MinimaxAgent(depth=depth)
     elif agent_type == "AlphaBeta":
@@ -891,7 +624,7 @@ if __name__ == "__main__":
     ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
     display = NullGraphics()
 
-    # since minimax has no training, we will run several iterations of eval games
+    # since these agents have no training, we just run several games to calculate the performance using the average over all games
     print(f"Running {num_eval_games} evaluation games\n")
 
     time_start = time.perf_counter()
@@ -905,12 +638,12 @@ if __name__ == "__main__":
         numTraining=0,
         catchExceptions=False,
         timeout=30,
-        randomRewards=False,
+        randomRewards=True,
         max_steps=1000
     )
     time_end = time.perf_counter()
 
-    # collect stats
+    # output score, win rate, and time stats over all games
     scores = [g.state.getScore() for g in games]
     wins = [g.state.isWin() for g in games]
     try:
@@ -923,7 +656,6 @@ if __name__ == "__main__":
     total_time = time_end - time_start
     time_per_game = total_time / num_eval_games
 
-    # print stats (similar to PA2)
     print(f"{agent} Agent Evaluation Stats")
     print(f"Games played: {num_eval_games}")
     print(f"Average score: {avg_score:.2f}")
