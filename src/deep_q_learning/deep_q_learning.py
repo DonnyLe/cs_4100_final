@@ -67,7 +67,6 @@ class DeepQLearningAgent(Agent):
         use_reward_shaping=True,
     ):
         super().__init__()
-        print("Q-file: ", qfile)
         print("Load model: ", load_model)
         self.qfile = qfile          # where to SAVE
         self.device = (
