@@ -11,17 +11,20 @@
 # Student side autograding was added by Brad Miller, Nick Hay, and
 # Pieter Abbeel (pabbeel@cs.berkeley.edu).
 
-
+import sys
 from util import manhattanDistance, nearestPoint
-from game import Directions
+from game import Directions, Agent
 import random, util
 import numpy as np
-import math
 from util import Stack
 import os
 import pickle
-
-from game import Agent
+import time
+import pacman as pac
+import layout as pac_layout
+import ghostAgents
+from training_utils import runGamesQuiet
+from textDisplay import NullGraphics
 
 class Node:
 
@@ -61,7 +64,7 @@ class LocalQAgent(Agent):
     CELL_FOOD = 2
     CELL_CAPSULE = 3
     CELL_GHOST = 4
-    CELL_SCARED_GHOST = 5
+    CELL__GHOST = 5
     CELL_PACMAN = 6
 
     def __init__(self,
@@ -253,22 +256,10 @@ class LocalQAgent(Agent):
         except Exception as exc:
             print(f"[LocalQAgent] Failed to save Q-table: {exc}")
 
-    """
-    A reflex agent chooses an action at each choice point by examining
-    its alternatives via a state evaluation function.
-
-    The code below is provided as a guide.  You are welcome to change
-    it in any way you see fit, so long as you don't touch our method
-    headers.
-    """
-
-    pass
-
 def scoreEvaluationFunction(currentGameState):
     """
     This default evaluation function just returns the score of the state.
     The score is the same one displayed in the Pacman GUI.
-
     This evaluation function is meant for use with adversarial search agents
     (not reflex agents).
     """
@@ -296,34 +287,156 @@ class MultiAgentSearchAgent(Agent):
 
 class MinimaxAgent(MultiAgentSearchAgent):
     """
-    Your minimax agent (question 2)
+    Minimax agent implementation where Pacman is considered the maximizing player and the Ghosts are
+    sequentially looped through as the minimizing player(s). As we discussed in class, the Max player
+    goes first and the game continues in an alternating fashion until a terminal state is achieved (Pacman
+    wins or loses the game).
     """
+    def basicUtility(self, gameState):
+        """
+        Basic utility function that just returns the game score (the same one displayed in the Pacman GUI).
+        """
+        return gameState.getScore()
+    
+    def improvedUtility(self, gameState):
+        """
+        Improved utility function for minimax: adds rewards for capturing pellets, penalizes danger (ghosts),
+        rewards being close to and eating food.
+        """
 
+        # terminal states - game is already won/lost
+        if gameState.isWin():
+            return float("inf")
+        if gameState.isLose():
+            return -float("inf")
+
+        score = gameState.getScore()
+        pacman = gameState.getPacmanPosition()
+        ghosts = gameState.getGhostStates()
+        ghostPositions = gameState.getGhostPositions()
+        food = gameState.getFood().asList()
+        capsules = gameState.getCapsules()
+        epsilon = 1e-6
+
+        # penalize getting closer to ghosts
+        for i, ghost in enumerate(ghosts):
+            gPosition = ghostPositions[i]
+            gDistance = util.manhattanDistance(pacman, gPosition)
+            if ghost.scaredTimer > 0 and gDistance > 0:
+                # if ghost is scared, Pacman should be rewarded for getting closer to it
+                score += 300.0 / gDistance
+
+            else :
+                # varying levels of penalties depending on proximity
+                if gDistance <= 1:
+                    score -= 500
+                elif gDistance <= 2:
+                    score -= 50
+                else:
+                    score -= 1.0 / gDistance
+            
+        # reward for getting closer to food
+        if food:
+            closestFoodDist = min(util.manhattanDistance(pacman, f) for f in food)
+            score += 10.0 / (closestFoodDist + epsilon)
+            score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
+            # prioritizes moving closer to a large amount of food so that Pacman doesn't get stuck on one side of the map with one pellet
+            avgFoodDist = sum(util.manhattanDistance(pacman, f) for f in food) / len(food)
+            score += 5.0 / (avgFoodDist + epsilon)
+            if pacman in food:
+                score += 500
+
+        # reward for getting closer to power capsules
+        if capsules:
+            closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
+            score += 20.0 / (closestCap + epsilon)
+            # prioritize if ghosts are close
+            for gPos, gState in zip(ghostPositions, ghosts):
+                gDistance = util.manhattanDistance(pacman, gPos)
+                if gState.scaredTimer == 0 and gDistance <= 3:
+                    score += 30.0 / (closestCap + epsilon)
+
+        # penalize stalling / oscillation
+        # - came from initial observations of Pacman getting stuck at walls/doing back-and-forth motions
+        score += 500 / (len(food) + epsilon)
+
+        return float(score)
+    
+    def _minimax_decision(self, gameState, depth=2):
+        """
+        Returns the best action for Pacman (agentIndex=0) using the minimax algorithm.
+        """
+
+        legal = [a for a in gameState.getLegalActions(0) if a != Directions.STOP]
+        bestAction = legal[0]
+        bestValue = -float("inf")
+
+        if not legal:
+            return Directions.STOP
+
+        for action in legal:
+            successor = gameState.generateSuccessor(0, action)
+            value = self._minimax(successor, depth, agentIndex=1)
+
+            if value > bestValue:
+                bestValue = value
+                bestAction = action
+
+        return bestAction
+    
+    def _minimax(self, state, depth, agentIndex):
+        """
+        Recursively computes minimax value for the given state using adverserial search.
+        """
+
+        # terminal state - just return the utility (objective function) value
+        if depth == 0 or state.isWin() or state.isLose():
+            return self.improvedUtility(state)
+
+        numAgents = state.getNumAgents()
+
+        legal = state.getLegalActions(agentIndex)
+        if not legal:
+            return self.improvedUtility(state)
+
+        # maximizing player - Pacman (agentIndex = 0)
+        if agentIndex == 0:
+            maxValue = -float("inf")
+
+            for action in state.getLegalActions(0):
+                succ = state.generateSuccessor(0, action)
+                maxValue = max(maxValue, self._minimax(succ, depth, agentIndex=1))
+            
+            return maxValue
+
+        # minimizing player - Ghost (agentIndex >= 1)
+        else:
+            minValue = float("inf")
+            nextAgent = agentIndex + 1
+            nextDepth = depth
+
+            # once we reach the last ghost, we cycle back to Pacman agent and decrease depth
+            if nextAgent == numAgents:
+                nextAgent = 0
+                nextDepth -= 1
+            for action in state.getLegalActions(agentIndex):
+                succ = state.generateSuccessor(agentIndex, action)
+                minValue = min(minValue, self._minimax(succ, nextDepth, nextAgent))
+
+            return minValue
+        
     def getAction(self, gameState):
         """
         Returns the minimax action from the current gameState using self.depth
         and self.evaluationFunction.
-
-        Here are some method calls that might be useful when implementing minimax.
-
-        gameState.getLegalActions(agentIndex):
-        Returns a list of legal actions for an agent
-        agentIndex=0 means Pacman, ghosts are >= 1
-
-        gameState.generateSuccessor(agentIndex, action):
-        Returns the successor game state after an agent takes an action
-
-        gameState.getNumAgents():
-        Returns the total number of agents in the game
-
-        gameState.isWin():
-        Returns whether or not the game state is a winning state
-
-        gameState.isLose():
-        Returns whether or not the game state is a losing state
         """
-        "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        if hasattr(self, "lastPos") and gameState.getPacmanPosition() == self.lastPos:
+            self.stuckCounter = getattr(self, "stuckCounter", 0) + 1
+        else:
+            self.stuckCounter = 0
+
+        self.lastPos = gameState.getPacmanPosition()
+        return self._minimax_decision(gameState, depth=2)
 
 class AlphaBetaAgent(MultiAgentSearchAgent):
     """
@@ -337,30 +450,96 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
         "*** YOUR CODE HERE ***"
         util.raiseNotDefined()
 
-class ExpectimaxAgent(MultiAgentSearchAgent):
+def parse_args():
     """
-      Your expectimax agent (question 4)
+    Helper to read arguments for evaluating the Minimax and AlphaBeta agents with a specified depth.
     """
+    # default params
+    agent_type = "Minimax"
+    depth = 2
 
-    def getAction(self, gameState):
-        """
-        Returns the expectimax action using self.depth and self.evaluationFunction
+    args = sys.argv[1:]
+    for i in range(len(args)):
+        if args[i] == "--agent" and i + 1 < len(args):
+            agent_type = args[i+1]
+        elif args[i] == "--depth" and i + 1 < len(args):
+            depth = int(args[i+1])
 
-        All ghosts should be modeled as choosing uniformly at random from their
-        legal moves.
-        """
-        "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+    return agent_type, depth
 
-def betterEvaluationFunction(currentGameState):
-    """
-    Your extreme ghost-hunting, pellet-nabbing, food-gobbling, unstoppable
-    evaluation function (question 5).
 
-    DESCRIPTION: <write something here so we know what you did>
-    """
-    "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+"""
+The remaining code provides the evaluation mode for the Minimax and AlphaBeta agents.
+In order to run the evaluation games, you can pass in two arguments:
+- agent_type - 'Minimax' or 'AlphaBeta' (defuault: 'Minimax')
+- depth - any integer value (default: 2 - should be kept small for time/space complexity)
 
-# Abbreviation
-better = betterEvaluationFunction
+Here are sample configurations:
+- python multiAgents.py
+-- Will run 1000 medium-classic games with 2 ghosts, using the Minimax agent with depth 2
+- python multiAgents.py --agent AlphaBeta --depth 3
+-- Will run 1000 medium-classic games with 2 ghosts, using the AlphaBeta agent with depth 3
+"""
+if __name__ == "__main__":
+    agent_type, depth = parse_args()
+
+    print(f"Evaluation using - Agent: {agent_type}, Depth: {depth}")
+
+    # allows us to compare our Minimax and AlphaBeta agents by running the same evaluation config/params
+    if agent_type == "Minimax":
+        agent = MinimaxAgent(depth=depth)
+    elif agent_type == "AlphaBeta":
+        agent = AlphaBetaAgent(depth=depth)
+    else:
+        raise ValueError(f"Unknown agent type '{agent_type}'")
+    
+    num_eval_games = 1
+    layout_name = 'mediumClassic'
+    num_ghosts = 2
+    ghost_type = 'RandomGhost'
+    frame_time = 0
+
+    layout = pac_layout.getLayout(layout_name)
+    ghost_cls = getattr(ghostAgents, ghost_type)
+    ghosts = [ghost_cls(i + 1) for i in range(num_ghosts)]
+    display = NullGraphics()
+
+    # since these agents have no training, we just run several games to calculate the performance using the average over all games
+    print(f"Running {num_eval_games} evaluation games\n")
+
+    time_start = time.perf_counter()
+    games = runGamesQuiet(
+        layout=layout,
+        pacman=agent,
+        ghosts=ghosts,
+        display=display,
+        numGames=num_eval_games,
+        record=False,
+        numTraining=0,
+        catchExceptions=False,
+        timeout=30,
+        randomRewards=True,
+        max_steps=1000
+    )
+    time_end = time.perf_counter()
+
+    # output score, win rate, and time stats over all games
+    scores = [g.state.getScore() for g in games]
+    wins = [g.state.isWin() for g in games]
+    try:
+        lengths = [len(g.moveHistory) for g in games]
+    except:
+        lengths = []
+    avg_score = np.mean(scores)
+    win_rate = sum(wins) / num_eval_games
+    avg_length = np.mean(lengths) if lengths else 0
+    total_time = time_end - time_start
+    time_per_game = total_time / num_eval_games
+
+    print(f"{agent} Agent Evaluation Stats")
+    print(f"Games played: {num_eval_games}")
+    print(f"Average score: {avg_score:.2f}")
+    print(f"Win rate: {win_rate:.2%}")
+    print(f"Average game length: {avg_length:.1f} moves")
+    print(f"Total runtime: {total_time:.2f} sec")
+    print(f"Time per game: {time_per_game:.2f} sec")
