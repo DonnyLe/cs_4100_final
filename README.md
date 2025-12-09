@@ -13,6 +13,8 @@ The goal of this project was to implement multiple AI agents into the classic *P
 
 ![Pac-Man Demo](/images/pacman_winning.gif)
 
+**Also, please note that some preferred package versions are displayed in the `requirements.txt` file.**
+
 ### Reinforcement Learning Agents:
 
 #### 1. SARSA Agent
