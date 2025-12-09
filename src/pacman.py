@@ -728,15 +728,6 @@ def readCommand(argv):
                       help=default(
                           'the agent TYPE in the pacmanAgents module to use'),
                       metavar='TYPE', default='KeyboardAgent')
-    parser.add_option('--algo', dest='algo',
-                  help='RL algorithm: q or dqn',
-                  choices=['q', 'dqn'], default=None)
-    parser.add_option('--mode', dest='mode',
-                    help='RL mode: train or eval',
-                    choices=['train', 'eval'], default=None)
-    parser.add_option('--qfile', dest='qfile',
-                    help='Q-table filename (for Q-learning eval)', default=None)
-
     parser.add_option('-t', '--textGraphics', action='store_true', dest='textGraphics',
                       help='Display output as text only', default=False)
     parser.add_option('-q', '--quietTextGraphics', action='store_true', dest='quietGraphics',
