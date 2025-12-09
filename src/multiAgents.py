@@ -43,6 +43,14 @@ class Node:
     def __ne__(self, other):
         return self.state != other.state
 
+def scoreEvaluationFunction(currentGameState):
+    """
+    This default evaluation function just returns the score of the state.
+    The score is the same one displayed in the Pacman GUI.
+    This evaluation function is meant for use with adversarial search agents
+    (not reflex agents).
+    """
+    return currentGameState.getScore()
 
 class MultiAgentSearchAgent(Agent):
     """
