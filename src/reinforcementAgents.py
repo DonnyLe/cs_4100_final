@@ -10,19 +10,18 @@ import math
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-
-# this is the output directory for the data files
+# creates the output directory for sarsa if one doesn't exist, so i can keep all training artifacts in one place
 def ensure_sarsa_output_dir():
     if not os.path.exists('sarsa_data'):
         os.makedirs('sarsa_data')
     return 'sarsa_data'
-
+# returns the output path for the sarsa data files, like plots or weight files
 def get_sarsa_output_path(filename):
     ensure_sarsa_output_dir()
     return os.path.join('sarsa_data', filename)
 
+# using linear function approximation instead of using q tables cause of the huge state space
 class SARSAAgent(Agent):
-    
     def __init__(self, index=0, epsilon=1.0, alpha=0.005, gamma=0.9, numTraining=100,
                  epsilonDecay=0.9999, minEpsilon=0.05, weightsFile=None):
         self.index = index
@@ -34,6 +33,7 @@ class SARSAAgent(Agent):
         self.gamma = float(gamma)
         self.numTraining = int(numTraining)
         
+        # maintaining a weight vector, assigning each weight to a feature
         self.weights = util.Counter()
         self.episodesSoFar = 0
         self.lastState = None
@@ -51,6 +51,26 @@ class SARSAAgent(Agent):
         if self.numTraining > 0:
             print(f"training session: {self.weightsFile}")
         
+        # loading weights for evaluating the pacman performances w demo runs
+        self.loadWeights()
+    def loadWeights(self):
+        filepath = get_sarsa_output_path(self.weightsFile)
+        if not os.path.exists(filepath):
+            return
+        try:
+            with open(filepath, 'rb') as f:
+                data = pickle.load(f)
+            if isinstance(data, dict) and 'weights' in data:
+                self.weights = data['weights']
+                self.epsilon = data.get('epsilon', self.minEpsilon)
+                print(f"loaded weights from {self.weightsFile}")
+            else:
+                self.weights = data
+                print(f"loaded raw weights from {self.weightsFile}")
+        except Exception as e:
+            print(f"failed loading weights: {e}")
+    
+    # saving learned weghts
     def saveWeights(self):
         try:
             filepath = get_sarsa_output_path(self.weightsFile)
@@ -66,9 +86,10 @@ class SARSAAgent(Agent):
             if self.episodesSoFar >= self.numTraining:
                 print(f"Failed saving weights: {e}")
     
+    # generating plots for runing average reward, showing agents improvement (hopefully)
     def plotAverageRewards(self):
         if len(self.allEpisodeRewards) == 0:
-            print("No episode rewards to plot.")
+            print("no rewards to plot")
             return
         
         rewards = np.array(self.allEpisodeRewards)
@@ -96,6 +117,8 @@ class SARSAAgent(Agent):
                 f.write(f'{i},{r},{avg}\n')
         print(f"Saved episode rewards CSV to: {csv_path}")
     
+    # transforming raw game states into feature reppresentations 
+    # using current state and action being evaled
     def getFeatures(self, state, action):
         features = util.Counter()
         
@@ -103,12 +126,16 @@ class SARSAAgent(Agent):
             successor = state.generatePacmanSuccessor(action)
         except:
             successor = None
-            
+        
+        # invalid actions
         if successor is None:
             features['bias'] = 1.0
             features['invalid-action'] = -1.0
             return features
         
+        
+        # baseline q value
+        # for linear regression
         features['bias'] = 1.0
         
         pacmanPos = successor.getPacmanPosition()
@@ -116,15 +143,19 @@ class SARSAAgent(Agent):
         ghostStates = successor.getGhostStates()
         capsules = successor.getCapsules()
         
+        #normalizing the score change by diving 100 to keep values small
         scoreDiff = successor.getScore() - state.getScore()
         features['score-delta'] = scoreDiff / 100.0
         
+        # food features
         if len(foodList) > 0:
+            # im inversing the distance to nearest food pellet, so closer food gives higher values
             minFoodDist = min([util.manhattanDistance(pacmanPos, food) for food in foodList])
             features['nearest-food'] = 1.0 / (minFoodDist + 1.0)
         
         features['food-remaining'] = len(foodList) / 100.0
         
+        # ghost features
         activeGhostDistances = []
         scaredGhostDistances = []
         
@@ -137,25 +168,35 @@ class SARSAAgent(Agent):
             else:
                 activeGhostDistances.append(dist)
         
+        # this is for handling active ghosts
         if len(activeGhostDistances) > 0:
             minActiveGhostDist = min(activeGhostDistances)
             if minActiveGhostDist <= 1:
+                # ghost is next to the pacman, high priroirty cause next step is improtant for surivival
                 features['imminent-danger'] = 1.0
             elif minActiveGhostDist <= 3:
+                # not as high priority, cause ghost is close
+                # distance is inversed so closer ghosts give higher values
                 features['danger'] = 1.0 / minActiveGhostDist
             else:
+                # far ghosts
                 features['ghost-distance'] = 1.0 / (minActiveGhostDist + 1.0)
         
+        # for scared ghosts
         if len(scaredGhostDistances) > 0:
             minScaredDist = min(scaredGhostDistances)
+            # encourage closing distance to scared ghosts 
             features['scared-ghost-nearby'] = 1.0 / (minScaredDist + 1.0)
             if minScaredDist <= 1:
                 features['eat-ghost-opportunity'] = 1.0
         
+
+        # capsule features
         if len(capsules) > 0 and len(activeGhostDistances) > 0:
             minCapsuleDist = min([util.manhattanDistance(pacmanPos, cap) for cap in capsules])
             features['nearest-capsule'] = 1.0 / (minCapsuleDist + 1.0)
         
+        # no stopping, penalized
         if action == Directions.STOP:
             features['stopped'] = 1.0
         
@@ -164,14 +205,18 @@ class SARSAAgent(Agent):
 
         return features
     
+    # this is for calculating q values using linear function approximation
     def getQValue(self, state, action):
         features = self.getFeatures(state, action)
+        # sum of weight * feature for all of them
         qValue = sum(self.weights[f] * features[f] for f in features)
         
         if math.isnan(qValue) or math.isinf(qValue):
             return 0.0
         return qValue
     
+    # getting best policy based on current q values
+    # so it should be choosing the action w the highest q value
     def getPolicy(self, state):
         legalActions = state.getLegalPacmanActions()
         if len(legalActions) == 0:
@@ -192,8 +237,12 @@ class SARSAAgent(Agent):
         if len(bestActions) == 0:
             return random.choice(legalActions)
         
+        # random select in order to handle ties between actions w same q values
         return random.choice(bestActions)
     
+    # selecting actions using epsilon greedy policy
+    # explore vs exploit
+    # probability epsilon ? choose random (explore), otherwise choose best action (exploit)
     def getAction(self, state):
         legalActions = state.getLegalPacmanActions()
         
@@ -205,12 +254,15 @@ class SARSAAgent(Agent):
         
         if self.episodesSoFar < self.numTraining:
             if util.flipCoin(self.epsilon):
+                # random actions
                 action = random.choice(legalActions)
             else:
+                # exloiting by using best q value actions
                 action = self.getPolicy(state)
         else:
             action = self.getPolicy(state)
         
+        # sarsa update from prev transition
         if self.lastState is not None:
             currentScore = state.getScore()
             reward = currentScore - self.lastScore
@@ -223,22 +275,30 @@ class SARSAAgent(Agent):
         
         return action
     
+    # this func performing sarsa weight update
     def update(self, state, action, reward, nextState, nextAction):
         if nextState.isWin() or nextState.isLose():
             target = reward
         else:
+            # using q value of the action the agent ACTUALLY took, not max q value action
             target = reward + self.gamma * self.getQValue(nextState, nextAction)
+        
         
         currentQ = self.getQValue(state, action)
         difference = target - currentQ
         
+        # clipping td error to implement gradient clipping 
+        # this is for preventing big gradient updates that could cause instability
         difference = max(-10.0, min(10.0, difference))
         
+        # updating the weights
+        # positive td error means underestimate so increase weight, negative means otherwise
         features = self.getFeatures(state, action)
         for feature in features:
             update = self.alpha * difference * features[feature]
             self.weights[feature] += update
             
+            # clipping weights to range of -100 100
             self.weights[feature] = max(-100.0, min(100.0, self.weights[feature]))
     
     def final(self, state):
@@ -247,7 +307,7 @@ class SARSAAgent(Agent):
             reward = currentScore - self.lastScore
             self.episodeReward += reward
             
-            # terminal state: Q(terminal) = 0
+            # terminal state, target === reward cause q terminal = 0
             features = self.getFeatures(self.lastState, self.lastAction)
             currentQ = sum(self.weights[f] * features[f] for f in features)
             difference = reward - currentQ
@@ -264,11 +324,10 @@ class SARSAAgent(Agent):
         
         self.episodesSoFar += 1
         
-        # decay epsilon during training
+        # decay epsilon during training, but min is 0.05
         if self.episodesSoFar < self.numTraining:
             self.epsilon = max(self.minEpsilon, self.epsilon * self.epsilonDecay)
         
-        # determine result
         if state.isWin():
             result = "WIN"
         elif state.data.maxSteps and state.data.steps >= state.data.maxSteps:
@@ -281,11 +340,10 @@ class SARSAAgent(Agent):
             avgReward = np.mean(self.allEpisodeRewards[-100:]) if len(self.allEpisodeRewards) >= 100 else np.mean(self.allEpisodeRewards)
             print(f"e:{self.episodesSoFar}|avgR:{avgReward:.1f}|eps:{self.epsilon:.4f}|{result}")
         
-        # print eval results after training
         if self.episodesSoFar > self.numTraining:
             print(f"Eval E:{self.episodesSoFar - self.numTraining}|S:{state.getScore():.0f}|{result}")
         
-        # save periodically during training
+        # this is for saving periodically during training
         if self.episodesSoFar % 500 == 0 and self.episodesSoFar <= self.numTraining:
             self.saveWeights()
         
@@ -293,6 +351,7 @@ class SARSAAgent(Agent):
         self.lastAction = None
         self.episodeReward = 0.0
         
+        # just for saving final weights and drawing plots
         if self.episodesSoFar == self.numTraining:
             self.saveWeights()
             self.plotAverageRewards()
