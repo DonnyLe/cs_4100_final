@@ -1,0 +1,49 @@
+======================================================================
+QLEARNING Agent Training Statistics
+======================================================================
+Generated: 2025-12-09 17:07:12
+======================================================================
+
+TRAINING CONFIGURATION
+----------------------------------------------------------------------
+Agent Type: qlearning
+Number of Episodes: 1000
+Runtime: 70.57 seconds (1.18 minutes)
+
+HYPERPARAMETERS
+----------------------------------------------------------------------
+gamma: 0.9
+epsilon: 1.0
+decay_rate: 0.999
+min_epsilon: 0.05
+window_size: 2
+
+PERFORMANCE METRICS
+----------------------------------------------------------------------
+Average Reward: -291.52
+Std Dev Reward: 234.16
+Min Reward: -571.00
+Max Reward: 530.00
+Final Reward: 180.00
+
+EXPLORATION
+----------------------------------------------------------------------
+Initial Epsilon: 1.0000
+Final Epsilon: 0.3677
+Total Decay: 0.6323
+
+Q-LEARNING SPECIFIC
+----------------------------------------------------------------------
+Q-table Size: 9261 states
+
+GAME CONFIGURATION
+----------------------------------------------------------------------
+layout: mediumClassic
+num_ghosts: 2
+ghost_type: RandomGhost
+max_steps: 200
+random_rewards: False
+
+======================================================================
+End of Report
+======================================================================
