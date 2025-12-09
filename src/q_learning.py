@@ -22,9 +22,8 @@ RESET = '\033[0m'
 
 ACTION_LIST = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST, Directions.STOP]
 
-# ENV_WINDOW_SIZE = 2  # Play with this parameter to test different observation windows
+ENV_WINDOW_SIZE = 2  # Play with this parameter to test different observation windows
 # ENV_WINDOW_SIZE = 3  # Let's try 3, this would be a 7x7 observation window, so pretty big... idk i'm curious if he'll do better
-ENV_WINDOW_SIZE = 1 # Just curious if this would even be feasible...
 
 OUTPUT_DIR = 'q_learning_data'  # Just ensuring we output every file to one folder to keep things clean and organized
 
@@ -435,8 +434,8 @@ def softmax(x, temp=1.0):
     return e_x / e_x.sum(axis=0)
 
 # Default experiment settings
-num_episodes = 10_000
-decay_rate = 0.9999
+num_episodes = 200_000
+decay_rate = 0.99997
 # Let's include the window size because at definitely changes the Q-table.
 qfile_name = f'Q_table_{num_episodes}_{decay_rate}_{ENV_WINDOW_SIZE}.pickle'
 # qfile_name = f'Q_table_{num_episodes}_{decay_rate}.pickle'
