@@ -75,7 +75,7 @@ class MultiAgentSearchAgent(Agent):
 class MinimaxAgent(MultiAgentSearchAgent):
     """
     Minimax agent implementation where Pacman is considered the maximizing player and the Ghosts are
-    sequentially looped through as the minimizing player(s). As we discussed in class, the Max player
+    sequentially looped through as the minimizing player. As we discussed in class, the MAX player
     goes first and the game continues in an alternating fashion until a terminal state is achieved (Pacman
     wins or loses the game).
     """
@@ -87,8 +87,10 @@ class MinimaxAgent(MultiAgentSearchAgent):
     
     def improvedUtility(self, gameState):
         """
-        Improved utility function for minimax: adds rewards for capturing pellets, penalizes danger (ghosts),
-        rewards being close to and eating food.
+        Improved utility function for minimax that takes a proximity-based approach.
+        Instead of rewards/penalties only upon action completion ...
+        - Incentivizes moving closer to pellets, power capsules, scared ghosts, and pellet hotspots. 
+        - Penalizes not eating any new pellets and getting closer to regular ghosts.
         """
 
         # terminal states - game is already won/lost
@@ -103,7 +105,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
         ghostPositions = gameState.getGhostPositions()
         food = gameState.getFood().asList()
         capsules = gameState.getCapsules()
-        epsilon = 1e-6
+        epsilon = 1e-6 # used to prevent division by 0 but still allow for high reward/penalty when distances are 0
 
         # penalize getting closer to ghosts
         for i, ghost in enumerate(ghosts):
@@ -126,7 +128,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
         if food:
             closestFoodDist = min(util.manhattanDistance(pacman, f) for f in food)
             score += 10.0 / (closestFoodDist + epsilon)
-            score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
+
             # prioritizes moving closer to a large amount of food so that Pacman doesn't get stuck on one side of the map with one pellet
             avgFoodDist = sum(util.manhattanDistance(pacman, f) for f in food) / len(food)
             score += 5.0 / (avgFoodDist + epsilon)
@@ -137,13 +139,14 @@ class MinimaxAgent(MultiAgentSearchAgent):
         if capsules:
             closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
             score += 20.0 / (closestCap + epsilon)
+            
             # prioritize if ghosts are close
             for gPos, gState in zip(ghostPositions, ghosts):
                 gDistance = util.manhattanDistance(pacman, gPos)
                 if gState.scaredTimer == 0 and gDistance <= 3:
                     score += 30.0 / (closestCap + epsilon)
 
-        # penalize stalling / oscillation
+        # penalize not eating food to help prevent stalling / oscillation (somewhat like a time penalty)
         # - came from initial observations of Pacman getting stuck at walls/doing back-and-forth motions
         score += 500 / (len(food) + epsilon)
 
@@ -151,7 +154,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
     
     def _minimax_decision(self, gameState, depth=2):
         """
-        Returns the best action for Pacman (agentIndex=0) using the minimax algorithm.
+        Returns the best action for Pacman (agentIndex = 0) using the minimax algorithm.
         """
 
         legal = [a for a in gameState.getLegalActions(0) if a != Directions.STOP]
@@ -173,7 +176,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
     
     def _minimax(self, state, depth, agentIndex):
         """
-        Recursively computes minimax value for the given state using adverserial search.
+        Recursively computes the minimax value for the given state using the utility function.
         """
 
         # terminal state - just return the utility (objective function) value
@@ -214,8 +217,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
         
     def getAction(self, gameState):
         """
-        Returns the minimax action from the current gameState using self.depth
-        and self.evaluationFunction.
+        Returns the minimax action (using a depth of 2 for the game tree) from the current gameState for Pacman
         """
         if hasattr(self, "lastPos") and gameState.getPacmanPosition() == self.lastPos:
             self.stuckCounter = getattr(self, "stuckCounter", 0) + 1
@@ -225,80 +227,10 @@ class MinimaxAgent(MultiAgentSearchAgent):
         self.lastPos = gameState.getPacmanPosition()
         return self._minimax_decision(gameState, depth=2)
 
-class AlphaBetaAgent(MultiAgentSearchAgent):
+class AlphaBetaAgent(MinimaxAgent):
     """
     Your minimax agent with alpha-beta pruning (question 3)
     """
-
-    def improvedUtility(self, gameState):
-        """
-        Improved utility function for minimax: adds rewards for capturing pellets, penalizes danger (ghosts),
-        rewards being close to and eating food.
-        """
-
-        # terminal states - game is already won/lost
-        if gameState.isWin():
-            return float("inf")
-        if gameState.isLose():
-            return -float("inf")
-
-        score = gameState.getScore()
-        pacman = gameState.getPacmanPosition()
-        ghosts = gameState.getGhostStates()
-        ghostPositions = gameState.getGhostPositions()
-        food = gameState.getFood().asList()
-        capsules = gameState.getCapsules()
-        epsilon = 1e-6
-
-        # penalize getting closer to ghosts
-        for i, ghost in enumerate(ghosts):
-            gPosition = ghostPositions[i]
-            gDistance = util.manhattanDistance(pacman, gPosition)
-            if ghost.scaredTimer > 0 and gDistance > 0:
-                # if ghost is scared, Pacman should be rewarded for getting closer to it
-                score += 300.0 / gDistance
-
-            else :
-                # varying levels of penalties depending on proximity
-                if gDistance <= 1:
-                    score -= 500
-                elif gDistance <= 2:
-                    score -= 50
-                else:
-                    score -= 1.0 / gDistance
-            
-        # reward for getting closer to food
-        if food:
-            closestFoodDist = min(util.manhattanDistance(pacman, f) for f in food)
-            score += 10.0 / (closestFoodDist + epsilon)
-            score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
-            # prioritizes moving closer to a large amount of food so that Pacman doesn't get stuck on one side of the map with one pellet
-            avgFoodDist = sum(util.manhattanDistance(pacman, f) for f in food) / len(food)
-            score += 5.0 / (avgFoodDist + epsilon)
-            if pacman in food:
-                score += 500
-
-        # reward for getting closer to pellets
-        if capsules:
-            closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
-            score += 20.0 / (closestCap + epsilon)
-            # prioritize if ghosts are close
-            for gPos, gState in zip(ghostPositions, ghosts):
-                gDistance = util.manhattanDistance(pacman, gPos)
-                if gState.scaredTimer == 0 and gDistance <= 3:
-                    score += 30.0 / (closestCap + epsilon)
-
-        # penalize stalling / oscillation
-        # - came from initial observations of Pacman getting stuck at walls/doing back-and-forth motions
-        score += 500 / (len(food) + epsilon)
-
-        return float(score)
-
-    # def basicUtility(self, gameState):
-    #     """
-    #     Basic utility function that just returns the game score.
-    #     """
-    #     return gameState.getScore()
     
     def _alphabeta(self, state, depth, alpha, beta, agentIndex):
         """Alpha-beta pruning recursive search."""
@@ -356,6 +288,7 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
                 bestAction = action
 
         return bestAction
+    
 def parse_args():
     """
     Helper to read arguments for evaluating the Minimax and AlphaBeta agents with a specified depth.
