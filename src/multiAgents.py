@@ -288,7 +288,7 @@ class MultiAgentSearchAgent(Agent):
 class MinimaxAgent(MultiAgentSearchAgent):
     """
     Minimax agent implementation where Pacman is considered the maximizing player and the Ghosts are
-    sequentially looped through as the minimizing player(s). As we discussed in class, the Max player
+    sequentially looped through as the minimizing player. As we discussed in class, the MAX player
     goes first and the game continues in an alternating fashion until a terminal state is achieved (Pacman
     wins or loses the game).
     """
@@ -316,7 +316,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
         ghostPositions = gameState.getGhostPositions()
         food = gameState.getFood().asList()
         capsules = gameState.getCapsules()
-        epsilon = 1e-6
+        epsilon = 1e-6 # used to prevent division by 0 but still allow for high reward/penalty when distances are 0
 
         # penalize getting closer to ghosts
         for i, ghost in enumerate(ghosts):
@@ -339,7 +339,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
         if food:
             closestFoodDist = min(util.manhattanDistance(pacman, f) for f in food)
             score += 10.0 / (closestFoodDist + epsilon)
-            score -= closestFoodDist * 0.2  # if Pacman gets stuck, should prioritize movind toward the food more
+
             # prioritizes moving closer to a large amount of food so that Pacman doesn't get stuck on one side of the map with one pellet
             avgFoodDist = sum(util.manhattanDistance(pacman, f) for f in food) / len(food)
             score += 5.0 / (avgFoodDist + epsilon)
@@ -350,13 +350,14 @@ class MinimaxAgent(MultiAgentSearchAgent):
         if capsules:
             closestCap = min(util.manhattanDistance(pacman, c) for c in capsules)
             score += 20.0 / (closestCap + epsilon)
+            
             # prioritize if ghosts are close
             for gPos, gState in zip(ghostPositions, ghosts):
                 gDistance = util.manhattanDistance(pacman, gPos)
                 if gState.scaredTimer == 0 and gDistance <= 3:
                     score += 30.0 / (closestCap + epsilon)
 
-        # penalize stalling / oscillation
+        # penalize not eating food to help prevent stalling / oscillation (somewhat like a time penalty)
         # - came from initial observations of Pacman getting stuck at walls/doing back-and-forth motions
         score += 500 / (len(food) + epsilon)
 
@@ -364,7 +365,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
     
     def _minimax_decision(self, gameState, depth=2):
         """
-        Returns the best action for Pacman (agentIndex=0) using the minimax algorithm.
+        Returns the best action for Pacman (agentIndex = 0) using the minimax algorithm.
         """
 
         legal = [a for a in gameState.getLegalActions(0) if a != Directions.STOP]
@@ -386,7 +387,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
     
     def _minimax(self, state, depth, agentIndex):
         """
-        Recursively computes minimax value for the given state using adverserial search.
+        Recursively computes the minimax value for the given state using the utility function.
         """
 
         # terminal state - just return the utility (objective function) value
@@ -427,8 +428,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
         
     def getAction(self, gameState):
         """
-        Returns the minimax action from the current gameState using self.depth
-        and self.evaluationFunction.
+        Returns the minimax action (using a depth of 2 for the game tree) from the current gameState for Pacman
         """
         if hasattr(self, "lastPos") and gameState.getPacmanPosition() == self.lastPos:
             self.stuckCounter = getattr(self, "stuckCounter", 0) + 1
