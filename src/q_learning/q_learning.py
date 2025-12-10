@@ -56,7 +56,7 @@ def hashObservation(obs):
     return value
 
 # Taken from my PA2 assignment, this method is just a helper to help with plotting out the running average of rewards
-# over a training cycle.  Helps identify if the agent is actually getting better or just shitty the whole time.
+# over a training cycle.  Helps identify if the agent is actually getting better or just bad the whole time.
 def avg_training_rewards_plot(reward_df, num_episodes, decay_rate):
     reward_df = reward_df.sort_values('episode')
 
