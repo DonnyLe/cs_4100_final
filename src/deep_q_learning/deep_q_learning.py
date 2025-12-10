@@ -35,24 +35,29 @@ class ReplayMemory:
 class DeepQLearningAgent(Agent):
     """
     Deep Q-Learning agent for Pacman using a CNN over the full observable grid.
+    Generally followed code from https://docs.pytorch.org/tutorials/intermediate/reinforcement_q_learning.html.
+    Learned concepts from this video: 
+    https://www.youtube.com/watch?v=EUrWGTCGzlA&t=1504s&pp=ygUpZGVlcCBxIGxlYXJuaW5nIGluIHJlaW5mb3JjZW1lbnQgbGVhcm5pbmfSBwkJJQoBhyohjO8%3D
     """
 
-    # Hyperparameters
+    # default values, usually overridden 
     learning_rate = 0.001
     discount_factor = 0.99
+
+    # not able to be overridden through CLI 
     replay_memory_size = 50000
     batch_size = 64
     target_sync_steps = 1000
     
-    # Reward shaping (slightly stronger ghost avoidance)
-    backtrack_penalty = 1.0       # small penalty for reversing
-    food_shaping_scale = 2.0      # small incentive for moving toward food
+    # optional reward shaping 
+    backtrack_penalty = 1.0       # penality for reversing, to prevent oscillation
+    food_shaping_scale = 2.0      # reward for moving towards food 
     ghost_safe_scale = 3.0        # reward for moving farther from a dangerous ghost
     ghost_danger_scale = 3.0      # penalty for moving closer to a dangerous ghost
-    ghost_safety_radius = 5
-    ghost_danger_radius = 3
+    ghost_safety_radius = 5       # only give safe/danger penalties within this safe radius 
+    ghost_danger_radius = 3       # only give backtrack penalty if a ghost is not nearby 
 
-    # Exploration
+    # epsilon greedy algorithm params 
     initial_epsilon = 1.0
     min_epsilon = 0.05
     epsilon_decay = 0.9997
@@ -62,32 +67,31 @@ class DeepQLearningAgent(Agent):
         qfile=None,
         load_model=False,
         device=None,
-        debug_rewards=False,   # kept for compatibility, but no longer used
         load_path=None,
         use_reward_shaping=True,
     ):
         super().__init__()
         print("Load model: ", load_model)
-        self.qfile = qfile          # where to SAVE
+        self.qfile = qfile         
+
+        # GPU optimization 
         self.device = (
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         ) if device is None else device
 
         self.n_actions = len(ACTION_LIST)
 
-        # Networks (lazy-initialized)
         self.policy_net = None
         self.target_net = None
         self.optimizer = None
 
-        # Replay memory
+        # replay memory
         self.memory = ReplayMemory(self.replay_memory_size)
 
-        # Training state
         self.epsilon = self.initial_epsilon
         self.training = True
 
-        # Tracking
+        # tracking actions, used to calculate reward + helps with reward shaping
         self.last_state_tensor = None
         self.last_action_idx = None
         self.prev_action_idx = None
@@ -97,23 +101,20 @@ class DeepQLearningAgent(Agent):
         self.episode_rewards = []
         self.global_step = 0
 
+        # 
         self.loss_fn = nn.SmoothL1Loss()
 
-        # Model loading info
-        self._pending_load = load_model
-        self.load_path = load_path or qfile   # where to LOAD from
+        self.load_model = load_model
+        self.load_path = load_path or qfile  
 
         self.last_food_dist = None
         self.last_ghost_dist = None
 
-        # reward shaping toggle
+        # reward shaping flag
         self.use_reward_shaping = use_reward_shaping
 
-        # previous tile (no longer used for forced movement, but harmless to keep)
-        self.prev_tile = None
-
     def _closest_food_distance(self, state):
-        """Return Manhattan distance from Pacman to nearest food, or None if no food."""
+        """return Manhatten distance between ghost and food/pellet"""
         food = state.getFood()
         px, py = state.getPacmanPosition()
         px, py = int(round(px)), int(round(py))
@@ -129,7 +130,7 @@ class DeepQLearningAgent(Agent):
         return best
 
     def _is_reverse(self, curr_idx, prev_idx):
-        """Return True if action curr_idx is the exact reverse of prev_idx."""
+        """return True if current action is the reverse of the previous action"""
         if curr_idx is None or prev_idx is None:
             return False
         a = ACTION_LIST[curr_idx]
@@ -142,25 +143,26 @@ class DeepQLearningAgent(Agent):
         )
 
     def _init_networks_from_state(self, state):
-        """Initialize networks based on layout size."""
+        """initialize networks, can import from saved .pt file."""
         if self.policy_net is not None:
             return
 
         layout = state.data.layout
         width, height = layout.width, layout.height
 
-        in_channels = 6  # 6-channel input
+        in_channels = 6  # six channel inputs
 
         self.policy_net = PacmanCNN(width, height, self.n_actions, in_channels=in_channels).to(self.device)
         self.target_net = PacmanCNN(width, height, self.n_actions, in_channels=in_channels).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
+        # Adam optimizer, commonly used
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
 
-        if self._pending_load:
+        if self.load_model:
             self._load_model()
-            self._pending_load = False
+            self.load_model = False
 
     def _save_model(self):
         if not self.qfile or self.policy_net is None:
@@ -213,24 +215,22 @@ class DeepQLearningAgent(Agent):
         self.last_ghost_dist = None
         self.episode_reward = 0.0
 
-        self.prev_tile = None
 
     def store_transition(self, s, a, s_next, r, done, legal_next_indices):
         """
-        Store one transition in replay memory.
-
-        legal_next_indices:
-          - list of int indices for legal actions in next state
-          - or None / [] if terminal or not applicable
+        Store one transition in replay memory. Also stores legal actions 
+        b/c we don't want to chose from illegal actions
         """
         self.memory.append((s, a, s_next, r, done, legal_next_indices))
 
+    
     def optimize_policy(self):
-        """Sample a mini-batch and perform one gradient step."""
+        """sample a mini-batch and perform one gradient step."""
         if not self.training:
             return
         if self.policy_net is None or self.target_net is None:
             return
+        # not transitions added to memory to sample the batch size
         if len(self.memory) < self.batch_size:
             return
 
@@ -249,28 +249,29 @@ class DeepQLearningAgent(Agent):
         ) in mini_batch:
             state_batch = state_tensor.unsqueeze(0).to(self.device)
 
-            # ----- Build target value -----
+            # build target value
             if done or next_state_tensor is None or not legal_next_indices:
-                # Terminal state or no valid next actions: no bootstrap term
+                # terminal state, target_val is simply the reward
                 target_val = torch.tensor(
                     [reward], dtype=torch.float32, device=self.device
                 )
             else:
                 with torch.no_grad():
                     next_batch = next_state_tensor.unsqueeze(0).to(self.device)
-                    q_next = self.target_net(next_batch).squeeze(0)  # [n_actions]
-
-                    # Mask to only legal next actions
+                    # calculate future reward using the target CNN 
+                    q_next = self.target_net(next_batch).squeeze(0)  
+                    # only look at legal actions 
                     q_next_valid = q_next[legal_next_indices]
+                    # get best legal action 
                     max_next_q = q_next_valid.max()
-
+                    
+                    # calculate target val
                     target_val = torch.tensor(
                         [reward + self.discount_factor * max_next_q.item()],
                         dtype=torch.float32,
                         device=self.device,
                     )
 
-            # ----- Current Q and full target vector -----
             current_q = self.policy_net(state_batch).squeeze(0)  # [n_actions]
             target_q = current_q.detach().clone()
             target_q[action_idx] = target_val
@@ -283,12 +284,14 @@ class DeepQLearningAgent(Agent):
 
         loss = self.loss_fn(current_q_tensor, target_q_tensor)
 
+        # standard Pytorch to calculate gradients and update target network 
         self.optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self.policy_net.parameters(), 5.0)
         self.optimizer.step()
 
         self.global_step += 1
+        # when to make the target CNN replicate the policy CNN
         if self.global_step % self.target_sync_steps == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
 
@@ -443,7 +446,6 @@ class DeepQLearningAgent(Agent):
         self.last_action_idx = action_idx
         self.last_food_dist = curr_food_dist
         self.last_ghost_dist = curr_ghost_dist
-        self.prev_tile = (cx, cy)
 
         direction = ACTION_LIST[action_idx]
         return direction

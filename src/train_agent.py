@@ -1,7 +1,26 @@
-"""
-train_agent.py - Unified training/evaluation script for Pacman RL agents
+'''
+Reusable train agent file that both DQL and QL use to train and evaluate 
+models. 
+'''
 
-Usage:
+
+
+
+import sys
+import argparse
+from deep_q_learning.deep_q_learning import DeepQLearningAgent
+import layout as pac_layout
+import ghostAgents
+from q_learning.q_learning import QLearningAgent
+from training_utils import TrainingSession, EvaluationSession, get_output_path
+from textDisplay import NullGraphics
+from graphicsDisplay import PacmanGraphics
+
+
+def parse_args():
+    """Parse command line arguments for training/evaluation.
+    Example Commands: 
+
     # Train Q-learning agent
     python train_agent.py --agent qlearning --train --episodes 25000
 
@@ -16,40 +35,31 @@ Usage:
 
     # Watch DQN agent play
     python train_agent.py --agent dqn --eval --load-model dqn_model.pt --episodes 1 --gui --frame-time 0.05
-"""
+    
 
-import sys
-import argparse
-from deep_q_learning.deep_q_learning import DeepQLearningAgent
-import layout as pac_layout
-import ghostAgents
-from q_learning.q_learning import QLearningAgent
-from training_utils import TrainingSession, EvaluationSession, get_output_path
-from textDisplay import NullGraphics
-from graphicsDisplay import PacmanGraphics
-
-
-def parse_args():
-    """Parse command line arguments for training/evaluation."""
+    
+    """
     parser = argparse.ArgumentParser(
         description='Train or evaluate Pacman RL agents',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
     
-    # Mode selection
+    # used AI for building the parser 
+    
+    # mode selection 
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument('--train', action='store_true',
                            help='Run in training mode')
     mode_group.add_argument('--eval', action='store_true',
                            help='Run in evaluation mode')
     
-    # Agent selection
+    # agent selection
     parser.add_argument('--agent', type=str, required=True,
                        choices=['qlearning', 'dqn'],
                        help='Which RL agent to use')
     
-    # Game configuration
+    # game configuration
     parser.add_argument('--layout', type=str, default='mediumClassic',
                        help='Pacman layout to use (default: mediumClassic)')
     parser.add_argument('--ghosts', type=int, default=2,
@@ -64,6 +74,7 @@ def parse_args():
     # Display
     parser.add_argument('--gui', action='store_true',
                        help='Enable graphical display (useful for watching agent play)')
+    # frametime is the time between 2 frame. --frame-time 0.1 is 10 frames/steps per second. 
     parser.add_argument('--frame-time', type=float, default=0.001,
                        help='Frame time for GUI in seconds - higher = slower, easier to watch (default: 0.001)')
     
@@ -87,7 +98,7 @@ def parse_args():
     parser.add_argument('--learning-rate', type=float, default=1e-3,
                        help='Learning rate (DQN only, default: 0.001)')
     
-    # Reward shaping toggle (DQN only)
+    # reward shaping toggle (DQN only)
     parser.add_argument(
         '--no-reward-shaping',
         action='store_true',
@@ -164,7 +175,7 @@ def create_agent(args):
             use_reward_shaping=not args.no_reward_shaping,
         )
 
-        # Override hyperparameters if provided
+        # override hyperparameters if provided
         agent.learning_rate = args.learning_rate
         agent.discount_factor = args.gamma
         agent.initial_epsilon = args.epsilon
@@ -208,13 +219,13 @@ def main():
     else:
         display = NullGraphics()
     
-    # Load layout
+    # load layout
     layout = pac_layout.getLayout(args.layout)
     if layout is None:
         print(f"Error: Could not load layout '{args.layout}'")
         sys.exit(1)
     
-    # Create ghosts
+    # create ghosts
     try:
         ghost_cls = getattr(ghostAgents, args.ghost_type)
         ghosts = [ghost_cls(i + 1) for i in range(args.ghosts)]
@@ -241,7 +252,7 @@ def main():
             randomRewards=args.random_rewards
         )
         
-        # Save model
+        # save model
         if model_file:
             if hasattr(agent, '_save_qtable'):
                 agent._save_qtable()
@@ -250,7 +261,7 @@ def main():
                 agent._save_model()
                 print(f"Saved model to: {get_output_path(model_file, agent_type=agent_type)}")
         
-        # Report results
+        # report results
         plot_kwargs = {
             'decay_rate': args.decay_rate,
         }
@@ -259,7 +270,7 @@ def main():
         
         session.report_results(save_plot=not args.no_plot, **plot_kwargs)
     
-    # Evaluation mode
+    # evaluation mode
     elif args.eval:
         if args.load_model is None:
             print("Error: --load-model required for evaluation mode")

@@ -1,5 +1,5 @@
 """
-training_utils.py - Reusable training utilities for Pacman RL agents
+Reusable utils file that both QL and DQL use.
 """
 import os
 import time
@@ -16,6 +16,11 @@ import datetime
 
 OUTPUT_DIR = 'q_learning_data'
 
+
+"""
+Note: Used AI for parts for this file, primarily 
+to print out the evaluation text files and graphs 
+"""
 
 def ensure_output_dir(agent_type=None):
     """
@@ -462,7 +467,7 @@ class EvaluationSession:
             'duration': duration,
         }
         
-        # Save evaluation results to file
+        # save evaluation results to file
         self._save_evaluation_stats(results, scores, wins, episode_lengths, eval_stats)
         
         return results
@@ -483,7 +488,7 @@ class EvaluationSession:
             f.write(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("="*70 + "\n\n")
             
-            # Summary
+            # summary
             f.write("SUMMARY STATISTICS\n")
             f.write("-" * 70 + "\n")
             f.write(f"Agent Type: {self.agent_type}\n")
@@ -493,7 +498,7 @@ class EvaluationSession:
             f.write(f"Evaluation Runtime: {results['duration']:.2f} seconds ({results['duration']/60:.2f} minutes)\n")
             f.write("\n")
             
-            # Hyperparameters / Config (if provided)
+            # provided hyperparameters
             if self.hyperparameters:
                 f.write("HYPERPARAMETERS / CONFIGURATION\n")
                 f.write("-" * 70 + "\n")
@@ -501,7 +506,7 @@ class EvaluationSession:
                     f.write(f"{k}: {v}\n")
                 f.write("\n")
             
-            # Score statistics
+            # score statistics
             f.write("SCORE STATISTICS\n")
             f.write("-" * 70 + "\n")
             f.write(f"Average Score: {results['avg_score']:.2f}\n")
@@ -511,7 +516,7 @@ class EvaluationSession:
             f.write(f"Median Score: {np.median(scores):.2f}\n")
             f.write("\n")
             
-            # Episode length stats
+            # episode length stats
             if episode_lengths:
                 f.write("EPISODE LENGTH STATISTICS\n")
                 f.write("-" * 70 + "\n")
@@ -521,7 +526,7 @@ class EvaluationSession:
                 f.write(f"Median Length: {np.median(episode_lengths):.0f} moves\n")
                 f.write("\n")
             
-            # Q-learning specific evaluation stats (if available)
+            # q-learning stats if available
             if eval_stats is not None:
                 f.write("Q-LEARNING EVALUATION STATISTICS\n")
                 f.write("-" * 70 + "\n")
@@ -533,7 +538,7 @@ class EvaluationSession:
                 f.write(f"New States Encountered: {eval_stats['new_states_encountered']}\n")
                 f.write("\n")
             
-            # Individual game results
+            # individual game results
             f.write("INDIVIDUAL GAME RESULTS\n")
             f.write("-" * 70 + "\n")
             f.write(f"{'Game':<6} {'Win':<6} {'Score':<10} {'Length':<10}\n")

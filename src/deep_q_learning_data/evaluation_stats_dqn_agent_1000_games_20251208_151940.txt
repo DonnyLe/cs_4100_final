@@ -11,7 +11,7 @@ Games Played: 1000
 Wins: 630
 Win Rate: 63.00%
 Evaluation Runtime: 237.75 seconds (3.96 minutes)
-Model: dqn_ep10000_rs_on.pt
+Model: dqn_rs_10k.pt
 
 HYPERPARAMETERS / CONFIGURATION
 ----------------------------------------------------------------------

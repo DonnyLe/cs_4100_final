@@ -10,15 +10,15 @@ from util import nearestPoint
 
 def build_full_observation_tensor(state):
     """
-    Build a (C, H, W) tensor directly from a GameState.
+    Build a tensor from the game state for the CNNs.
 
     6 Channels:
-      0: Walls
-      1: Food (1.0 where food present)
-      2: Capsules
-      3: Pacman position
-      4: Ghosts (non-scared)
-      5: Scared ghosts
+    0: walls
+    1: food/pellets (
+    2: capsules
+    3: Pacman position
+    4: dangerous ghost (non-scared)
+    5: scared ghosts
     """
     walls = state.getWalls()
     food = state.getFood()
@@ -30,7 +30,7 @@ def build_full_observation_tensor(state):
     px_f, py_f = state.getPacmanPosition()
     px, py = int(round(px_f)), int(round(py_f))
 
-    # Ghosts
+    # ghosts
     ghost_normal = set()
     ghost_scared = set()
     for ghost_state in state.getGhostStates():
@@ -49,31 +49,31 @@ def build_full_observation_tensor(state):
 
     for x in range(width):
         for y in range(height):
-            # Channel 0: Walls
+            # channel 0: walls
             if walls[x][y]:
                 arr[0, y, x] = 1.0
 
-            # Channel 1: Food
+            # channel 1: pellets/food
             if food[x][y]:
                 arr[1, y, x] = 1.0
 
-            # Channel 2: Capsules
+            # channel 2: capsules
             if (x, y) in capsules:
                 arr[2, y, x] = 1.0
 
-            # Channel 4: Non-scared ghosts
+            # channel 4: dangerous ghosts
             if (x, y) in ghost_normal:
                 arr[4, y, x] = 1.0
 
-            # Channel 5: Scared ghosts
+            # channel 5: scared ghosts
             if (x, y) in ghost_scared:
                 arr[5, y, x] = 1.0
 
-    # Channel 3: Pacman position
+    # channel 3: Pacman position
     if 0 <= px < width and 0 <= py < height:
         arr[3, py, px] = 1.0
 
-    return torch.from_numpy(arr)  # (6, H, W)
+    return torch.from_numpy(arr)
 
 
 class PacmanCNN(nn.Module):
@@ -88,10 +88,9 @@ class PacmanCNN(nn.Module):
         """
         super().__init__()
 
-        # Smaller convolutional layers
         self.conv1 = nn.Conv2d(
             in_channels=in_channels,
-            out_channels=32,        # was 64
+            out_channels=32,     
             kernel_size=3,
             stride=1,
             padding=1,
@@ -100,34 +99,33 @@ class PacmanCNN(nn.Module):
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.conv2 = nn.Conv2d(
-            in_channels=32,         # match conv1 out_channels
-            out_channels=64,        # was 128
+            in_channels=32,       
+            out_channels=64,       
             kernel_size=3,
             stride=1,
             padding=1,
         )
-
-        # Compute FC input size after two poolings
-        h_out = height // 4  # after two 2x2 pools
+        # after two 2x2 pools
+        h_out = height // 4  
         w_out = width // 4
         fc_in_dim = 64 * h_out * w_out
 
-        # Smaller fully-connected layers
-        self.fc1 = nn.Linear(fc_in_dim, 128)  # was 256
+        # dense layers
+        self.fc1 = nn.Linear(fc_in_dim, 128)  
         self.fc2 = nn.Linear(128, n_actions)
 
     def forward(self, x):
         """
-        x: (B, C, H, W)
-        returns: (B, n_actions) of Q-values
+        x: (Batch_size, C, H, W)
+        returns: (Batch_size, n_actions)
         """
-        x = F.relu(self.conv1(x))  # (B, 32, H, W)
-        x = self.pool(x)           # (B, 32, H/2, W/2)
+        x = F.relu(self.conv1(x))  
+        x = self.pool(x)           
 
-        x = F.relu(self.conv2(x))  # (B, 64, H/2, W/2)
-        x = self.pool(x)           # (B, 64, H/4, W/4)
+        x = F.relu(self.conv2(x)) 
+        x = self.pool(x)         
 
-        x = torch.flatten(x, 1)    # (B, 64 * H/4 * W/4)
-        x = F.relu(self.fc1(x))    # (B, 128)
-        x = self.fc2(x)            # (B, n_actions)
+        x = torch.flatten(x, 1)   
+        x = F.relu(self.fc1(x))   
+        x = self.fc2(x)          
         return x

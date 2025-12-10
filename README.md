@@ -89,7 +89,59 @@ The above commands will allow you to visualize an agent trained off of 200,000 e
 
 #### 3. Deep Q-Learning Agent
 
-- Input short description of deep q-learning agent/algorithm here, which file(s) it lives in, and instructions on how to run the agent.
+The third algorithm implemented is a fully-observable deep Q-learning agent. To learn more about this algorithm, we used [this](https://www.youtube.com/watch?v=EUrWGTCGzlA&t=1504s&pp=ygUpZGVlcCBxIGxlYXJuaW5nIGluIHJlaW5mb3JjZW1lbnQgbGVhcm5pbmfSBwkJJQoBhyohjO8%3D) video which gave a detailed guide on how the algorithm works on a different application. 
+
+**File Structure**
+- All trained agents utilize the `train_agent.py` file to actually undergo training.  This specific agent lives within the `/src/deep_q_learning/deep_q_learning.py` file, and the resulting Q-Tables and performance visualizations live within the `/src/deep_q_learning_data` directory. In this folder, there are reward graphs, along with output files for each training and evaluation run. 
+
+**Agent Setup Instructions**
+- The Deep Q-Learning agent can be ran in two different ways: 1) training mode, 2) evaluation mode.  When running in training mode, the agent will play for a specified number of training episodes, and the epsilon value will decay by the specified decay rate.  It will store to a Pytorch .pt file `/src/deep_q_learning_data` directory.  *Note that runtimes can be particularly high for the Deep Q-Learning agent while training.*
+- The user can also run the agent in evaluation mode, in which case the user can choose from s in the above folder for the agent to select actions from.  Each policy is stored in a .pt file.
+- The current .pt files in the folder are the following: 
+- dqn_nors_2k.pt, dqn_nors_10k.pt, dqn_nors20k.pt are models with trained with 2k, 10k, and 20k episodes respectively, along with no reward shaping
+- dqn_rs_2k.pt, dqn_rs_10k.pt are models trained with 2k and 10 episodes respectively, along with reward shaping 
+
+
+- Below is an example of the command line arguments required to run the agent in training mode (ensure you are in the `/src` directory!):
+
+```
+cd src
+```
+```
+python train_agent.py --agent dqn --train \
+  --episodes 20000 \
+  --learning-rate 0.0005 \
+  --epsilon 1.0 \                   
+  --decay-rate 0.99985 \  
+  --layout mediumClassic \               
+  --ghosts 2 \
+  --max-steps 1000 \
+  --no-reward-shaping \
+  --save-model dqn_nors_20k.pt 
+  
+  ```
+
+The above command trains a DQL model with 20k episodes, with a learning rate of 0.0005, on the mediumClassic layout, with two ghosts, with a maxStep count of 10000, without reward shaping and saves the model to `/src/deep_q_learning_data/` folder. `--no-reward-shaping` is a flag to disable reward shaping on the train command. See `train_agent.py` for all CLI options. 
+
+
+- Next, here is an example of the command line arguments required to run the agent in evaluation mode (ensure you are in the `src` directory!):
+
+```
+cd src
+```
+
+```
+python train_agent.py \
+  --agent dqn \
+  --eval \
+  --episodes 1000 \
+  --load-model dqn_nors_20k.pt \  
+  --layout mediumClassic \
+  --ghosts 2 \
+  --max-steps 1000 --gui --frame-time 0.1
+```
+
+The above commands will allow you to visualize an agent trained off of 20k episodes, playing for 1000 episodes. At conclusion, the program will output various performance metrics to the terminal to help the user analyze overall success & areas of weakness. It will also save an evaluation file to `src/deep_q_learning_data` folder. To run the agent in evaluation mode without visualizing on the GUI (*faster method*), simply omit the `--gui` and `--frame-time` arguments. This makes the performance faster. 
 
 ### Adversarial Search Agents:
 
