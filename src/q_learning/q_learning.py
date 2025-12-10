@@ -1,21 +1,11 @@
-import sys
 import os
-import time
 import pickle
-import random
 import textwrap
-import textDisplay
 
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 
-from game import Agent, Directions, Game
-from pacman import GameState, runGames, readCommand, ClassicGameRules
-import layout as pac_layout
-import ghostAgents
-from graphicsDisplay import PacmanGraphics
+from game import Agent, Directions
 from training_utils import get_output_path
 
 

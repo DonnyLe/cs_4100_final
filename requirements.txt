@@ -1,0 +1,13 @@
+
+gym==0.26.2
+gymnasium==0.29.1
+matplotlib==3.8.0
+nbformat==5.10.4
+numpy==1.24.3
+pandas==2.3.2
+pygame==2.6.1
+scikit-learn==1.7.2
+scipy==1.14.1
+seaborn==0.13.2
+torch==2.1.1
+tqdm==4.65.0
