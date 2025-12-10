@@ -100,7 +100,7 @@ actions left for a player to take.
 
 #### 2. Alpha-Beta Pruning Enhancement
 
-- Input short description of alpha-beta pruning agent/algorithm here, which file(s) it lives in, and instructions on how to run the agent.
+The second adversarial search algorithm implemented was the Minimax algorithm with Alpha-Beta Pruning. Please visit [this](https://rajagopalvenkat.com/teaching/resources/AI/ch5.html#expectiminimax) link for more information on these algorithms and their implementations. The alpha-beta pruning algorithm is a modification of the pure Minimax algorithm where two new parameters are introduced (alpha and beta) and are used to keep track of the best value the maximizing player (Pacman) can obtain, and the best value that the minimizing player (the ghosts) can obtain, respectively. Similar to the pure Minimax algorithm, this algorithm is also recursive and assumes that Pacman and the ghosts play optimally at every turn. Using these values, the algorithm eliminates, or prunes, unnecessary exploration of subtrees or branches that will not contribute to the final decision for the next best move. This reduces the time complexity of Minimax significantly while providing similar performance, as it uses the same number of computations as Minimax to explore twice the depth of the search tree. To most accurately compare results, this agent used the same basic and improved utility functions as the pure Minimax agent, as well as a depth of 2.
 
 **File Structure**
 - Since adversarial search algorithms are based on a multi-agent philosophy, the Minimax and Alpha-Beta Pruning agent implementations both live within the `src/multiAgents.py` file.
