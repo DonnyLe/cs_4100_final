@@ -19,7 +19,7 @@ The goal of this project was to implement multiple AI agents into the classic *P
 
 #### 1. SARSA Agent
 
-The first reinformcemet learning algorithm was the SARSA (State-Action-Reward-State-Action) algorithm. SARSA is an op-policy temporal difference learning method that learns Q-values based on the actual actions chosen by the agent, including random exploratory actions. The crucial difference between SARSA and Q-learning is that SARSA learns the value of the policy being followed rather than the optimal policy. This makes SARSA strategies comparatively more conservative in dangerous environments. Please visit [this](https://rajagopalvenkat.com/teaching/resources/AI/ch6.html#rl) link for information on the theoretical foundations of SARSA.
+The first reinforcement learning algorithm was the SARSA (State-Action-Reward-State-Action) algorithm. SARSA is an op-policy temporal difference learning method that learns Q-values based on the actual actions chosen by the agent, including random exploratory actions. The crucial difference between SARSA and Q-learning is that SARSA learns the value of the policy being followed rather than the optimal policy. This makes SARSA strategies comparatively more conservative in dangerous environments. Please visit [this](https://rajagopalvenkat.com/teaching/resources/AI/ch6.html#rl) link for information on the theoretical foundations of SARSA.
 
 This particular implementation uses **linear function approximation** rather than a Q-table, because Pac-Man demands a large state space. So instead of storing Q-values in a table, the agent learns feature weights and compute Q-values as a weighted sum of game features, such as distance to the nearest food pellet, and power capsule. 
 
@@ -99,12 +99,63 @@ The above commands will allow you to visualize an agent trained off of 200,000 e
 
 #### 1. Minimax Agent
 
-- Input short description of minimax agent/algorithm here, which file(s) it lives in, and instructions on how to run the agent.
+The first adversarial search algorithm implemented was a Minimax algorithm.  Please visit [this](https://rajagopalvenkat.com/teaching/resources/AI/ch5.html#expectiminimax) link for information on adversarial search algorithms, including the high-level pseudo-code on which the Minimax agent is implemented based. As best suited for the Minimax algorithm, this agent utilizes a fully-observable, deterministic environment where Pac-Man is the maximizing player and the ghosts act as one minimizing player. In order to choose actions for Pac-Man, the algorithm assumes that Pac-Man and the ghosts are both agents that play optimally every turn (**Note:** we don't actually choose actions for the ghosts as the scope of this project is focused on comparing Pac-Man agents rather than creating ghost agents). To choose the Minimax decision, we have defined two versions of a utility function, `basicUtility(gameState)` and `improvedUtility(gameState)`, which provide the value for that player at a given state through either using the built-in game score or a more proximity-based approach (as documented within the function), respectively. The utility function is specifically computed when a terminal state of the game tree is reached. We selected a maximum depth of 2 for our implementation, so the terminal states are reached at the branches of depth 2 or when there are no legal
+actions a player can take.
 
 #### 2. Alpha-Beta Pruning Enhancement
 
 - Input short description of alpha-beta pruning agent/algorithm here, which file(s) it lives in, and instructions on how to run the agent.
 
+**File Structure**
+- Since adversarial search algorithms are based on a multi-agent philosophy, the Minimax and Alpha-Beta Pruning agent implementations both live within the `src/multiAgents.py` file.
+
+**Agent Setup Instructions**
+
+- To run individual games with the GUI, simply run the command for the respective agent:
+1. Minimax Agent
+```
+cd src
+```
+```
+python pacman.py -p MinimaxAgent -l mediumClassic
+``` 
+
+2. Alpha-Beta Agent
+```
+cd src
+```
+```
+python pacman.py -p AlphaBetaAgent -l mediumClassic
+``` 
+
+- In order to run the evaluation mode, you can run the `src\multiAgents.py` file with the option to pass in two arguments:
+ 1. agent_type - 'Minimax' or 'AlphaBeta' (defuault: 'Minimax')
+ 2. depth - any integer value (default: 2 - should be kept small for time/space complexity)
+
+- Below are samples of the command line arguments that can be used to run each agent in evaluation mode (make sure you are in the `/src` directory!):
+
+1. Minimax Agent (Default Configuration)
+```
+cd src
+```
+```
+python multiAgents.py
+```
+"""
+The above will run 1,000 games on the mediumClassic layout with 2 adversarial ghosts, using the Minimax agent with depth 2.
+
+2. Alpha-Beta Agent
+```
+cd src
+```
+```
+python multiAgents.py --agent AlphaBeta --depth 3
+``` 
+The above will run 1,000 games on the mediumClassic layout with 2 adversarial ghosts, using the Alpha-Beta Pruning agent with depth 3
+(**Note:** Both our agents were evaluated using depth 2, this example just shows how to use the additional configurations).
+
+Once the evaluation mode executes running, the program will output various performance metrics to the terminal so that the user can analyze the overall strengths and weaknesses of each agent, including "Average Score", "Win Rate", and "Total Runtime".
+ 
 ## Sources
 
 Pacman Game
