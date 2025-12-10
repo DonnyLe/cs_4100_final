@@ -110,6 +110,7 @@ actions a player can take.
 - Since adversarial search algorithms are based on a multi-agent philosophy, the Minimax and Alpha-Beta Pruning agent implementations both live within the `src/multiAgents.py` file.
 
 **Agent Setup Instructions**
+- Both the Minimax and Alpha-Beta Pruning agents don't require training, so they can either be run on individual games or a more extensive evaluation mode, that can be used to view how each agent performs and compare them using the same game configuration.
 
 - To run individual games with the GUI, simply run the command for the respective agent:
 1. Minimax Agent
