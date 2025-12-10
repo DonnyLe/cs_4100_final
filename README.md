@@ -35,7 +35,7 @@ cd src
 ```
 ```bash
 python pacman.py -p SARSAAgent -n 50000 -x 50000 -l mediumClassic \
-        -a epsilon=1.0,alpha=0.005,gamma=0.9,numTraining=50000,epsilonDecay=0.9999,minEpsilon=0.05
+    -a epsilon=1.0,alpha=0.005,gamma=0.9,numTraining=50000,epsilonDecay=0.9999,minEpsilon=0.05
 ```
 
 This command above will train the SARSA agent for 50,000 episodes on the mediumClassic layout. The parameters specify the initial epsilon, alpha (learning rate), gamma (discount factor), epsilon decay rate, and minimum epsilon value. The training progress and metrics will be logged every 100 episodes, and when training completes, the agent will save learned weights and generate a running average reward plot in the `sarsa_data` folder.
@@ -49,11 +49,7 @@ python pacman.py -p SARSAAgent -n 10 -l mediumClassic \
         -a numTraining=0,weightsFile=sarsa_n50000_e0.9999_20231215_143022.pkl
 ```
 
-The above command will load a trained SARSA agent and run it for 10 evaluation episodes. By setting `numTraining=0`, the agent runs in pure exploitation. The program will output performance metrics including final scores, game results, and win rate to the terminal. To visualize the agent's behavior with a GUI at a readable speed, you can modify the command as follows:
-```bash
-python pacman.py -p SARSAAgent -n 10 -l mediumClassic --frameTime 0.1 \
-        -a numTraining=0,weightsFile=sarsa_n50000_e0.9999_20231215_143022.pkl
-```
+The above command will load a trained SARSA agent and run it for 10 evaluation episodes. By setting `numTraining=0`, the agent runs in pure exploitation. The program will output performance metrics including final scores, game results, and win rate to the terminal.
 
 
 #### 2. Q-Learning Agent
