@@ -99,8 +99,8 @@ The above commands will allow you to visualize an agent trained off of 200,000 e
 
 #### 1. Minimax Agent
 
-The first adversarial search algorithm implemented was a Minimax algorithm.  Please visit [this](https://rajagopalvenkat.com/teaching/resources/AI/ch5.html#expectiminimax) link for information on adversarial search algorithms, including the high-level pseudo-code on which the Minimax agent is implemented based. As best suited for the Minimax algorithm, this agent utilizes a fully-observable, deterministic environment where Pac-Man is the maximizing player and the ghosts act as one minimizing player. In order to choose actions for Pac-Man, the algorithm assumes that Pac-Man and the ghosts are both agents that play optimally every turn (**Note:** we don't actually choose actions for the ghosts as the scope of this project is focused on comparing Pac-Man agents rather than creating ghost agents). To choose the Minimax decision, we have defined two versions of a utility function, `basicUtility(gameState)` and `improvedUtility(gameState)`, which provide the value for that player at a given state through either using the built-in game score or a more proximity-based approach (as documented within the function), respectively. The utility function is specifically computed when a terminal state of the game tree is reached. We selected a maximum depth of 2 for our implementation, so the terminal states are reached at the branches of depth 2 or when there are no legal
-actions a player can take.
+The first adversarial search algorithm implemented was a Minimax algorithm.  Please visit [this](https://rajagopalvenkat.com/teaching/resources/AI/ch5.html#expectiminimax) link for information on adversarial search algorithms, including the high-level pseudo-code on which the Minimax agent is implemented based. As best suited for the Minimax algorithm, this agent utilizes a fully-observable, deterministic environment where Pac-Man is the maximizing player and the ghosts act as one minimizing player. In order to choose actions for Pac-Man, the algorithm assumes that Pac-Man and the ghosts are both agents that play optimally every turn (**Note:** we don't actually choose actions for the ghosts as the scope of this project is focused on comparing Pac-Man agents, rather than creating ghost agents). To choose the Minimax decision, we have defined two versions of a utility function, `basicUtility(gameState)` and `improvedUtility(gameState)`. They provide the value for that player at a given state through either using the built-in game score or a more proximity-based approach (as documented within the function), respectively. The utility function is computed when a terminal state of the game tree is reached. We selected a maximum depth of 2 for our implementation, so the terminal states are reached at the branches at that depth or when there are no legal
+actions left for a player to take.
 
 #### 2. Alpha-Beta Pruning Enhancement
 
@@ -110,9 +110,9 @@ actions a player can take.
 - Since adversarial search algorithms are based on a multi-agent philosophy, the Minimax and Alpha-Beta Pruning agent implementations both live within the `src/multiAgents.py` file.
 
 **Agent Setup Instructions**
-- Both the Minimax and Alpha-Beta Pruning agents don't require training, so they can either be run on individual games or a more extensive evaluation mode, that can be used to view how each agent performs and compare them using the same game configuration.
+- Both the Minimax and Alpha-Beta Pruning agents don't require training, so they can either be run on individual games or a more extensive evaluation mode. The evaluation mode can be used to view how each agent performs and compare them using the same game configurations.
 
-- To run individual games with the GUI, simply run the command for the respective agent:
+#### To run individual games with the GUI, simply run the command for the respective agent:
 1. Minimax Agent
 ```
 cd src
@@ -129,11 +129,11 @@ cd src
 python pacman.py -p AlphaBetaAgent -l mediumClassic
 ``` 
 
-- In order to run the evaluation mode, you can run the `src\multiAgents.py` file with the option to pass in two arguments:
- 1. agent_type - 'Minimax' or 'AlphaBeta' (defuault: 'Minimax')
- 2. depth - any integer value (default: 2 - should be kept small for time/space complexity)
+#### To run the evaluation mode, you can run the `src\multiAgents.py` file with the option to pass in two arguments:
+ 1. `agent_type`: 'Minimax' or 'AlphaBeta' (default: 'Minimax')
+ 2. `depth`: any integer value (default = 2, should be kept small for time/space complexity)
 
-- Below are samples of the command line arguments that can be used to run each agent in evaluation mode (make sure you are in the `/src` directory!):
+Below are samples of the command line arguments that can be used to run each agent in evaluation mode (make sure you are in the `/src` directory!):
 
 1. Minimax Agent (Default Configuration)
 ```
@@ -142,7 +142,6 @@ cd src
 ```
 python multiAgents.py
 ```
-"""
 The above will run 1,000 games on the mediumClassic layout with 2 adversarial ghosts, using the Minimax agent with depth 2.
 
 2. Alpha-Beta Agent
@@ -152,10 +151,10 @@ cd src
 ```
 python multiAgents.py --agent AlphaBeta --depth 3
 ``` 
-The above will run 1,000 games on the mediumClassic layout with 2 adversarial ghosts, using the Alpha-Beta Pruning agent with depth 3
-(**Note:** Both our agents were evaluated using depth 2, this example just shows how to use the additional configurations).
+The above will run 1,000 games on the mediumClassic layout with 2 adversarial ghosts, using the Alpha-Beta Pruning agent with depth 3. <br>
+(**Note:** Both our agents were evaluated using depth 2, this example just shows how to use the additional configurations)
 
-Once the evaluation mode executes running, the program will output various performance metrics to the terminal so that the user can analyze the overall strengths and weaknesses of each agent, including "Average Score", "Win Rate", and "Total Runtime".
+Once the evaluation mode executes running, the program will output various performance metrics to the terminal so that the user can analyze the overall strengths and weaknesses of the adversarial search agents, including "Average Score", "Win Rate", and "Total Runtime".
  
 ## Sources
 
