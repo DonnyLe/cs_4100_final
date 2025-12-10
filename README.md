@@ -19,7 +19,42 @@ The goal of this project was to implement multiple AI agents into the classic *P
 
 #### 1. SARSA Agent
 
-- Input short description of SARSA agent/algorithm here, which file(s) it lives in, and instructions on how to run the agent.
+The first reinformcemet learning algorithm was the SARSA (State-Action-Reward-State-Action) algorithm. SARSA is an op-policy temporal difference learning method that learns Q-values based on the actual actions chosen by the agent, including random exploratory actions. The crucial difference between SARSA and Q-learning is that SARSA learns the value of the policy being followed rather than the optimal policy. This makes SARSA strategies comparatively more conservative in dangerous environments. Please visit [this](https://rajagopalvenkat.com/teaching/resources/AI/ch6.html#rl) link for information on the theoretical foundations of SARSA.
+
+This particular implementation uses **linear function approximation** rather than a Q-table, because Pac-Man demands a large state space. So instead of storing Q-values in a table, the agent learns feature weights and compute Q-values as a weighted sum of game features, such as distance to the nearest food pellet, and power capsule. 
+
+**File Structure**
+- The SARSA agent implementation lives within the `/src/sarsa/reinforcementAgents.py` file. All training data, including learned weights, reward plots, and performance metrics, are automatically saved to the `/src/sarsa/sarsa_data` directory upon completion.
+
+**Agent Setup Instructions**
+- The SARSA agent can be ran in training mode or evaluation mode. When running in training mode, the agent will play for a specified number of episodes while learning feature weights. The epsilon value decays gradually (default rate = 0.9999) to shift the agent from exploration to exploitation. When training completes, the agent will save the learned weights as a pickle file and generate visuailzation of the learning curve and results.
+- When running in evaluation mode, the user can load previously trained weights to observe the agent's performance in the Pac-Man environment. Trained weight files are stored in the `src/sarsa/sarsa_data` directory.
+- Below is an example of the command line arguments required to run the agent in training mode, be sure that you are in the `/src` directory to start:
+```bash
+cd src
+```
+```bash
+python pacman.py -p SARSAAgent -n 50000 -x 50000 -l mediumClassic \
+        -a epsilon=1.0,alpha=0.005,gamma=0.9,numTraining=50000,epsilonDecay=0.9999,minEpsilon=0.05
+```
+
+This command above will train the SARSA agent for 50,000 episodes on the mediumClassic layout. The parameters specify the initial epsilon, alpha (learning rate), gamma (discount factor), epsilon decay rate, and minimum epsilon value. The training progress and metrics will be logged every 100 episodes, and when training completes, the agent will save learned weights and generate a running average reward plot in the `sarsa_data` folder.
+
+- Here is an example of the command line arguments for running the agent in evaluation mode, again ensure you are in the `src` directory:
+```bash
+cd src
+```
+```bash
+python pacman.py -p SARSAAgent -n 10 -l mediumClassic \
+        -a numTraining=0,weightsFile=sarsa_n50000_e0.9999_20231215_143022.pkl
+```
+
+The above command will load a trained SARSA agent and run it for 10 evaluation episodes. By setting `numTraining=0`, the agent runs in pure exploitation. The program will output performance metrics including final scores, game results, and win rate to the terminal. To visualize the agent's behavior with a GUI at a readable speed, you can modify the command as follows:
+```bash
+python pacman.py -p SARSAAgent -n 10 -l mediumClassic --frameTime 0.1 \
+        -a numTraining=0,weightsFile=sarsa_n50000_e0.9999_20231215_143022.pkl
+```
+
 
 #### 2. Q-Learning Agent
 
